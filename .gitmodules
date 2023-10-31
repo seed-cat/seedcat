@@ -1,0 +1,3 @@
+[submodule "hashcat"]
+	path = hashcat
+	url = git@github.com:bitcoin-recovery-tool/hashcat.git

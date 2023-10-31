@@ -1,0 +1,7 @@
+target/
+.idea
+*.iml
+*.tmp
+hc*
+hashes.zip
+bitcoin-recovery-tool*
