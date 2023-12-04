@@ -3,15 +3,13 @@ use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::sync::atomic::Ordering;
 
-use anyhow::{format_err, Error, Result};
+use anyhow::{Error, format_err, Result};
 use gzp::deflate::Gzip;
 use gzp::par::compress::{ParCompress, ParCompressBuilder};
 use gzp::ZWriter;
-use rand::Rng;
 
-use crate::logger::{Attempt, Logger};
+use crate::logger::Logger;
 use crate::permutations::Permutations;
 
 /// Generates combinations of elements in a fast way
@@ -45,7 +43,7 @@ impl<T: Clone + Debug> Combinations<T> {
 
     fn new_shard(
         elements: Vec<Vec<T>>,
-        mut permutations: Permutations<usize>,
+        permutations: Permutations<usize>,
         permute_indices: BTreeSet<usize>,
         length: usize,
         permutation: Vec<usize>,
@@ -76,18 +74,24 @@ impl<T: Clone + Debug> Combinations<T> {
         fixed
     }
 
-    pub fn first(&self) -> Vec<T> {
+    pub fn begin(&self) -> Vec<T> {
         let mut vec = vec![];
-        for element in &self.elements {
-            vec.push(element[0].clone());
+        for i in 0..self.length {
+            vec.push(self.elements[i][0].clone());
         }
         vec
     }
 
-    pub fn last(&self) -> Vec<T> {
+    pub fn end(&self) -> Vec<T> {
         let mut vec = vec![];
-        for element in &self.elements {
-            vec.push(element[element.len() - 1].clone());
+        let mut permute = self.permute_indices.clone();
+        for i in 0..self.length {
+            let mut j = i;
+            if self.permute_indices.contains(&i) {
+                j = permute.pop_last().unwrap();
+            }
+            let len = self.elements[j].len();
+            vec.push(self.elements[j][len - 1].clone());
         }
         vec
     }
@@ -272,7 +276,7 @@ impl Combinations<String> {
         let writer = BufWriter::new(file);
         let logname = format!("Writing Dictionary '{}'", filename);
         let timer = log.time(&logname, self.total()).await;
-        let timer_handle = timer.start(log.clone()).await;
+        let timer_handle = timer.start().await;
 
         let mut parz: ParCompress<Gzip> = ParCompressBuilder::new().from_writer(writer);
         let mut as_bytes = self.to_bytes();
@@ -281,7 +285,7 @@ impl Combinations<String> {
                 parz.write_all(str).expect("Failed to write");
             }
             parz.write(&[10]).unwrap();
-            timer.counter.fetch_add(1, Ordering::Relaxed);
+            timer.add(1);
         }
 
         parz.finish().map_err(Error::msg)?;
@@ -317,6 +321,17 @@ mod tests {
             }
         }
         expanded
+    }
+
+    #[test]
+    fn can_get_begin_and_end() {
+        let combinations = Combinations::permute(
+            vec![vec![1], vec![2], vec![3], vec![4]],
+            vec![0, 1, 2, 3],
+            3,
+        );
+        assert_eq!(combinations.begin(), vec![1, 2, 3]);
+        assert_eq!(combinations.end(), vec![4, 3, 2]);
     }
 
     #[test]

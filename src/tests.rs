@@ -82,7 +82,7 @@ impl Tests {
     }
 }
 
-pub async fn run_tests() -> Result<()> {
+pub async fn run_tests() {
     let mut tests = Tests::new();
 
     tests.test_binary(" -a 1Mbe4MHF4awqg2cojz8LRJErKaKyoQjsiD -s harbor,?,clinic,index,mix,shoe,tube,awkward,food,acquire,sustain,?",
@@ -130,11 +130,10 @@ pub async fn run_tests() -> Result<()> {
                 let output = format!("{}/{} tests passed.", passed, num);
                 println!("{}", output.as_str().dark_green());
                 if passed == num {
-                    return Ok(());
+                    return;
                 }
             }
             Err(err) => println!("{}", err.to_string().as_str().dark_red()),
         }
     }
-    Ok(())
 }

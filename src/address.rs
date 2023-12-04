@@ -4,12 +4,33 @@ use std::str::FromStr;
 use anyhow::{bail, format_err, Result};
 use bitcoin::bip32::{ChildNumber, Xpub};
 use bitcoin::{Address, Network};
+use crate::logger::Attempt;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct AddressValid {
     pub formatted: String,
     pub kind: AddressKind,
-    pub derivations: Vec<String>,
+    pub derivations: Derivations,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Derivations {
+    derivations: Vec<String>,
+    pub arg: String
+}
+
+impl Attempt for Derivations {
+    fn total(&self) -> u64 {
+        self.derivations.len() as u64
+    }
+
+    fn begin(&self) -> String {
+        self.derivations.first().expect("exists").clone()
+    }
+
+    fn end(&self) -> String {
+        self.derivations.last().expect("exists").clone()
+    }
 }
 
 const ERR_MSG: &str = "\nDerivation path should be valid comma or path-separated:
@@ -30,7 +51,7 @@ impl AddressValid {
         Ok(Self::new(formatted.clone(), kind, derivations))
     }
 
-    pub fn new(formatted: String, kind: AddressKind, derivations: Vec<String>) -> Self {
+    pub fn new(formatted: String, kind: AddressKind, derivations: Derivations) -> Self {
         Self {
             formatted,
             kind,
@@ -65,18 +86,21 @@ impl AddressValid {
         bail!(error);
     }
 
-    fn derivation(kind: &AddressKind, arg: &Option<String>) -> Result<Vec<String>> {
+    fn derivation(kind: &AddressKind, arg: &Option<String>) -> Result<Derivations> {
         let output = match arg {
-            None => kind.derivations.clone(),
+            None => Derivations{
+                derivations: kind.derivations.clone(),
+                arg: kind.derivations.join(","),
+            },
             Some(arg) => {
-                let mut output = vec![];
+                let mut derivations = vec![];
                 let split = if arg.contains(",") {
                     arg.split(",")
                 } else {
                     arg.split(" ")
                 };
 
-                for derivation in split {
+                for derivation in split.clone() {
                     let derivation = match derivation.strip_prefix("m/") {
                         None => bail!(
                             "Derivation path '{}' must start with 'm/'{}",
@@ -86,9 +110,12 @@ impl AddressValid {
                         Some(str) => str,
                     };
 
-                    output.extend(Self::derivation_paths(derivation)?);
+                    derivations.extend(Self::derivation_paths(derivation)?);
                 }
-                output
+                Derivations{
+                    derivations,
+                    arg: split.into_iter().map(|s| s.to_string()).collect::<Vec<_>>().join(","),
+                }
             }
         };
 
@@ -102,7 +129,7 @@ impl AddressValid {
             let mut tmp = vec![];
             let nodes = Self::derivation_nodes(path).map_err(|err| {
                 format_err!(
-                    "Error in derivation path '{}' {}{}",
+                    "Bad element in derivation path '{}' {}{}",
                     derivation,
                     err,
                     ERR_MSG
@@ -231,18 +258,25 @@ mod tests {
         assert!(kind.is_err());
     }
 
+    fn derivations(arg: &str, derivations: Vec<&str>) -> Derivations {
+        Derivations {
+            derivations: derivations.into_iter().map(|s| s.to_string()).collect(),
+            arg: arg.to_string(),
+        }
+    }
+
     #[test]
     fn parses_derivations() {
         let kind = AddressKind::new("", "", "", vec!["m/123".to_string()], false);
 
         let derivation = AddressValid::derivation(&kind, &None).unwrap();
-        assert_eq!(derivation, vec!["m/123"]);
+        assert_eq!(derivation, derivations("m/123", vec!["m/123"]));
 
         let derivation = AddressValid::derivation(&kind, &Some("m/0 m/1/?2".to_string())).unwrap();
-        assert_eq!(derivation, vec!["m/0", "m/1/0", "m/1/1", "m/1/2"]);
+        assert_eq!(derivation, derivations("m/0,m/1/?2", vec!["m/0", "m/1/0", "m/1/1", "m/1/2"]));
 
         let derivation = AddressValid::derivation(&kind, &Some("m/0,m/1'".to_string())).unwrap();
-        assert_eq!(derivation, vec!["m/0", "m/1'"]);
+        assert_eq!(derivation, derivations("m/0,m/1'", vec!["m/0", "m/1'"]));
 
         assert!(AddressValid::derivation(&kind, &Some("z/?2".to_string())).is_err());
     }

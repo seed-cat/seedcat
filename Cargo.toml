@@ -10,6 +10,4 @@ bitcoin = "0.31"
 tokio = { version = "1.33.0", features = ["full"] }
 crossterm = "0.27.0"
 gzp = {version = "0.11.3", default-features = false, features = ["deflate_rust"] }
-itertools = "0.12.0"
-rand = "0.8.5"
 sha2 = "0.10.8"

@@ -3,9 +3,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::Ordering;
 
-use anyhow::{format_err, Error, Result};
+use anyhow::{Error, format_err, Result};
 use crossterm::style::Stylize;
 use gzp::deflate::Gzip;
 use gzp::par::compress::{ParCompress, ParCompressBuilder};
@@ -178,7 +177,7 @@ impl Hashcat {
         total: u64,
     ) -> Result<()> {
         let timer = log.time("Writing Hashes", total).await;
-        let timer_handle = timer.start(log.clone()).await;
+        let timer_handle = timer.start().await;
         let hashfile = self.hashfile();
         let path = Path::new(&hashfile);
         let file = File::create(path).unwrap();
@@ -188,24 +187,23 @@ impl Hashcat {
         let mut parz: ParCompress<Gzip> = ParCompressBuilder::new().from_writer(writer);
         let kind = address.kind.key.as_bytes();
         let separator = ":".as_bytes();
+        let derivation = address.derivations.arg.as_bytes();
         let address = address.formatted.as_bytes();
         let newline = "\n".as_bytes();
 
         while let Some(seed) = receiver.recv().await {
-            for derivation in &self.address.derivations {
-                parz.write_all(kind).map_err(Error::msg)?;
-                parz.write_all(separator).map_err(Error::msg)?;
-                parz.write_all(derivation.as_bytes()).map_err(Error::msg)?;
-                parz.write_all(separator).map_err(Error::msg)?;
-                parz.write_all(&seed).map_err(Error::msg)?;
-                parz.write_all(separator).map_err(Error::msg)?;
-                parz.write_all(address).map_err(Error::msg)?;
-                parz.write_all(newline).map_err(Error::msg)?;
-            }
-            timer.counter.fetch_add(1, Ordering::Relaxed);
+            parz.write_all(kind).map_err(Error::msg)?;
+            parz.write_all(separator).map_err(Error::msg)?;
+            parz.write_all(derivation).map_err(Error::msg)?;
+            parz.write_all(separator).map_err(Error::msg)?;
+            parz.write_all(&seed).map_err(Error::msg)?;
+            parz.write_all(separator).map_err(Error::msg)?;
+            parz.write_all(address).map_err(Error::msg)?;
+            parz.write_all(newline).map_err(Error::msg)?;
+            timer.add(1);
         }
         parz.finish().map_err(Error::msg)?;
-        timer.counter.store(u64::MAX, Ordering::Relaxed);
+        timer.end();
         timer_handle.await.map_err(Error::msg)
     }
 
@@ -219,6 +217,13 @@ impl Hashcat {
         cmd.arg("--self-test-disable");
         cmd.arg("--status-timer");
         cmd.arg("1");
+
+        // FIXME: Required because the derivation loop2 makes status updates very slow
+        if self.address.derivations.total() > 10 {
+            cmd.arg("--force");
+            cmd.arg("-n");
+            cmd.arg("1");
+        }
 
         // -S mode is faster if we have <10M passphrases
         if is_pure_gpu && self.total_passphrases() < S_MODE_MAXIMUM {
@@ -363,9 +368,10 @@ impl Hashcat {
     }
 
     async fn run_stdout(&self, out: Option<ChildStdout>, log: &Logger) -> Result<Option<String>> {
-        let seed_ratio = self.seed.total() / max(1, self.seed.valid_seeds());
+        let mut seed_ratio = self.seed.total() / max(1, self.seed.valid_seeds());
+        seed_ratio *= self.address.derivations.total();
         let timer = log
-            .time_verbose("Recovering Bitcoin", self.total(), seed_ratio)
+            .time_verbose("Recovery Guesses", self.total(), seed_ratio)
             .await;
         let mut handle = None;
 
@@ -383,14 +389,14 @@ impl Hashcat {
                 let num = line.split(" (").nth(1).unwrap();
                 let num = num.split(" sec").nth(0).unwrap();
                 let num = num.parse::<u64>().expect("is num");
-                handle = Some(timer.start_at(log.clone(), num).await);
+                handle = Some(timer.start_at(num).await);
             } else if line.starts_with("Progress.........: ") {
                 let num = line.split(": ").nth(1).unwrap();
                 let num = num.split("/").nth(0).unwrap();
                 let total = num.parse::<u64>().expect("is num");
-                timer.counter.store(total, Ordering::Relaxed);
+                timer.store(total);
             } else if line.contains(&address) {
-                timer.counter.store(u64::MAX, Ordering::Relaxed);
+                timer.end();
                 if let Some(handle) = handle {
                     handle.await.expect("Logging finishes");
                 }
@@ -451,15 +457,13 @@ impl HashcatStdin {
 
 #[cfg(test)]
 mod tests {
-    use crate::address::address_kinds;
     use crate::hashcat::*;
 
     #[test]
     fn creates_total() {
-        let derivations = vec!["1".to_string(), "2".to_string()];
         let passphrase = Passphrase::from_arg(&vec!["?l".to_string()], &vec![]).unwrap();
         let seed = Seed::from_args("?", &None).unwrap();
-        let address = AddressValid::new("".to_string(), address_kinds()[0].clone(), derivations);
+        let address = AddressValid::from_arg(Some("1B2hrNm7JGW6Wenf8oMvjWB3DPT9H9vAJ9".to_string()), &None).unwrap();
         let hc = Hashcat::new(PathBuf::new(), address, seed, Some(passphrase));
 
         assert_eq!(hc.total(), 2 * 2048 * 26);
@@ -467,10 +471,9 @@ mod tests {
 
     #[test]
     fn determines_whether_to_run_pure_gpu() {
-        let derivations = vec!["1".to_string(), "2".to_string()];
         let passphrase = Passphrase::from_arg(&vec!["?l".to_string()], &vec![]).unwrap();
         let seed = Seed::from_args("zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,?,?", &None).unwrap();
-        let address = AddressValid::new("".to_string(), address_kinds()[0].clone(), derivations);
+        let address = AddressValid::from_arg(Some("1B2hrNm7JGW6Wenf8oMvjWB3DPT9H9vAJ9".to_string()), &None).unwrap();
         let mut hc = Hashcat::new(PathBuf::new(), address, seed, Some(passphrase));
 
         // 524288 = 2 derivations * 2048^2 seeds / 16 checksums

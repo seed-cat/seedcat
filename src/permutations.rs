@@ -1,5 +1,5 @@
 use std::cmp::min;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 
 /***
@@ -179,7 +179,7 @@ fn n_choose_k(n: usize, k: usize) -> u64 {
         0
     } else if n <= 20 {
         // Optimization when fitting into u64
-        FACTORIAL[n] / FACTORIAL[k] / FACTORIAL[(n - k)]
+        FACTORIAL[n] / FACTORIAL[k] / FACTORIAL[n - k]
     } else {
         let end = k.min(n - k) as u64;
         (1..=end).fold(1, |acc, val| acc * (n as u64 - val + 1) / val)
@@ -201,7 +201,7 @@ fn indexed_combination(i: u64, n: usize, k: usize) -> Vec<usize> {
             r -= n_choose_k(n - cs, k - s);
             cs += 1;
         }
-        combo.push((cs - 1));
+        combo.push(cs - 1);
         j = cs;
     }
     combo
@@ -239,8 +239,7 @@ fn indexed_permutation<T: Ord>(index: u64, mut list: Vec<T>) -> Vec<T> {
     for (index, element) in list.drain(..).enumerate() {
         result.insert(result_indices[&index], element);
     }
-    result.into_iter().map(|(_, element)| element)
-        .collect()
+    result.into_iter().map(|(_, element)| element).collect()
 }
 
 #[cfg(test)]

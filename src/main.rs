@@ -1,16 +1,13 @@
-use std::fmt::Display;
+use std::{env, io};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::exit;
-use std::{env, io};
 
 use anyhow::{bail, format_err, Result};
 use clap::Parser;
 use crossterm::style::Stylize;
-use gzp::ZWriter;
 
 use crate::address::AddressValid;
-use crate::benchmarks::{benchmark_combinations2, benchmark_combinations3, dicts};
 use crate::hashcat::Hashcat;
 use crate::logger::{Attempt, Logger};
 use crate::passphrase::Passphrase;
@@ -83,16 +80,22 @@ pub struct Cli {
 }
 
 #[tokio::main(flavor = "multi_thread")]
-async fn main() -> Result<()> {
+async fn main() {
     let cli: Cli = Cli::parse();
     if cli.self_test {
-        run_tests().await?;
+        run_tests().await;
         exit(0);
     }
 
     let logger = Logger::new();
-    let mut hashcat = configure(&cli, &logger)?;
-    let finished = hashcat.run(&cli.hashcat, &logger).await?;
+    let mut hashcat = match configure(&cli, &logger) {
+        Ok(hashcat) => hashcat,
+        Err(err) => return logger.println_err(&err.to_string())
+    };
+    let finished = match hashcat.run(&cli.hashcat, &logger).await {
+        Ok(finished) => finished,
+        Err(err) => return logger.println_err(&err.to_string())
+    };
 
     match finished {
         Finished {
@@ -107,14 +110,9 @@ async fn main() -> Result<()> {
                 logger.println(passphrase.as_str().stylize());
             }
         }
-        _ => logger.println(
-            "Exhausted Search - please try with different parameters"
-                .dark_red()
-                .bold(),
-        ),
+        _ => logger.println_err("Exhausted search with no results...try with different parameters"),
     }
     logger.println("".stylize());
-    Ok(())
 }
 
 pub fn configure(cli: &Cli, log: &Logger) -> Result<Hashcat> {
@@ -150,16 +148,16 @@ pub fn configure(cli: &Cli, log: &Logger) -> Result<Hashcat> {
         log.format_attempt("Passphrases", passphrase);
     }
 
-    log.print_num("Valid seeds: ", seed.valid_seeds());
+    // log.print_num("Valid seeds: ", seed.valid_seeds());
     if seed.valid_seeds() == 0 {
         bail!("All possible seeds have invalid checksums")
     }
-    let hashcat = Hashcat::new(exe, address, seed, passphrase);
+    let hashcat = Hashcat::new(exe, address.clone(), seed, passphrase);
 
     if hashcat.total() == u64::MAX {
         bail!("Exceeding 2^64 attempts will take forever to run, try reducing combinations");
     }
-    log.print_num("Total guesses: ", hashcat.total());
+    log.print_num("Total Guesses: ", hashcat.total());
 
     if hashcat.uses_binary_charsets()? {
         log.print(
@@ -171,6 +169,9 @@ pub fn configure(cli: &Cli, log: &Logger) -> Result<Hashcat> {
         log.print("Stdin Mode: CPU-limited due to many seeds to guess\n".dark_yellow());
     } else if !hashcat.has_enough_passphrases() {
         log.print("Stdin Mode: CPU-limited due to not enough passphrases to guess\n".dark_yellow());
+    }
+    if address.derivations.total() > 100 {
+        log.println("Note: More than 100 derivations will slow status updates".dark_yellow())
     }
 
     if !cli.skip_prompt {

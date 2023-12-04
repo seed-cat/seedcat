@@ -3,10 +3,8 @@ use std::fmt::{Display, Formatter};
 use std::string::ToString;
 
 use anyhow::{bail, format_err, Result};
-use bitcoin::hashes::{Hash, HashEngine};
-use crossterm::style::Stylize;
-use sha2::{Digest, Sha256};
 use sha2::digest::FixedOutputReset;
+use sha2::{Digest, Sha256};
 
 use crate::combination::Combinations;
 use crate::logger::Attempt;
@@ -42,11 +40,11 @@ impl Attempt for Seed {
     }
 
     fn begin(&self) -> String {
-        Self::to_words(&self.words.first())
+        Self::to_words(&self.words.begin())
     }
 
     fn end(&self) -> String {
-        Self::to_words(&self.words.last())
+        Self::to_words(&self.words.end())
     }
 }
 
@@ -607,6 +605,29 @@ mod tests {
     }
 
     #[test]
+    fn parses_begin_and_end() {
+        let seed = Seed::from_arg("?ppy,zoo").unwrap();
+        assert_eq!(seed.total(), 3);
+        assert_eq!(seed.begin(), "happy,zoo");
+        assert_eq!(seed.end(), "unhappy,zoo");
+
+        let seed = Seed::from_combo(
+            "paper ^warrior title|tool join assume trumpet setup angle helmet salmon save love zoo",
+            12,
+        )
+        .unwrap();
+        assert_eq!(seed.total(), 2_u64 * (1..=12).product::<u64>());
+        assert_eq!(
+            seed.begin(),
+            "paper,warrior,title,join,assume,trumpet,setup,angle,helmet,salmon,save,love"
+        );
+        assert_eq!(
+            seed.end(),
+            "zoo,warrior,love,save,salmon,helmet,angle,setup,trumpet,assume,join,tool"
+        );
+    }
+
+    #[test]
     fn parses_seeds_words() {
         let mut seed = Seed::from_arg("ability,?,zoo").unwrap();
         assert_eq!(seed.total(), 2048);
@@ -617,11 +638,6 @@ mod tests {
         assert_eq!(seed.total(), 2);
         assert_eq!(Seed::to_words(seed.next().unwrap()), "zone");
         assert_eq!(Seed::to_words(seed.next().unwrap()), "zoo");
-
-        let seed = Seed::from_arg("?ppy,zoo").unwrap();
-        assert_eq!(seed.total(), 3);
-        assert_eq!(seed.begin(), "happy,zoo");
-        assert_eq!(seed.end(), "unhappy,zoo");
 
         let mut seed = Seed::from_arg("?orro?").unwrap();
         assert_eq!(seed.total(), 3);

@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
-use std::fs::{canonicalize, File};
+use std::fs::File;
 use std::io;
 use std::path::PathBuf;
 
-use anyhow::{bail, format_err, Error, Result};
+use anyhow::{bail, Error, format_err, Result};
 
 use crate::combination::Combinations;
 use crate::logger::{Attempt, Logger};
@@ -67,7 +67,7 @@ impl Passphrase {
         )
     }
 
-    fn new(attack_mode: usize, mut args: Vec<PassphraseArg>, charsets: UserCharsets) -> Self {
+    fn new(attack_mode: usize, args: Vec<PassphraseArg>, charsets: UserCharsets) -> Self {
         let mut args = args.into_iter();
         Self {
             attack_mode,
@@ -198,7 +198,7 @@ impl Passphrase {
         let arg = arg.replace("//", "/").replace(",,", ",");
         let mut example_start = vec![];
         let mut example_end = vec![];
-        let mut wildcards = wildcards(charsets)?;
+        let wildcards = wildcards(charsets)?;
         let mut question = false;
         let mut combinations = 1_u64;
         for c in arg.chars() {
@@ -300,11 +300,11 @@ impl Attempt for Dictionary {
     }
 
     fn begin(&self) -> String {
-        self.combinations.first().join("")
+        self.combinations.begin().join("")
     }
 
     fn end(&self) -> String {
-        self.combinations.last().join("")
+        self.combinations.end().join("")
     }
 }
 
@@ -517,7 +517,6 @@ mod tests {
 
     #[test]
     fn validates_passphrase() {
-        let empty = UserCharsets::empty();
         let pp = Passphrase::from_arg(&vec!["?2".to_string()], &vec![None, Some("a".to_string())]);
         assert_eq!(pp.unwrap().attack_mode, 3);
 

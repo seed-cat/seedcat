@@ -22,7 +22,7 @@ pub async fn benchmark_permutations() {
     for mut p in perm.shard(100) {
         set.spawn(async move {
             let mut count = 0;
-            while let Some(next) = p.next() {
+            while let Some(_) = p.next() {
                 count += 1;
             }
             count
@@ -36,7 +36,7 @@ pub async fn benchmark_permutations() {
     println!("ELAPSED: {:?}", time.elapsed().as_millis());
 
     let mut count = 0;
-    while let Some(next) = perm.next() {
+    while let Some(_) = perm.next() {
         count += 1;
     }
     println!("ITERATIONS: {}", count);
@@ -100,7 +100,7 @@ pub async fn benchmark_combinations2() {
 // 800M
 #[allow(dead_code)]
 pub async fn benchmark_seed() {
-    let mut seed = Seed::from_args(
+    let seed = Seed::from_args(
         "music,eternal,upper,myth,slight,divide,voyage,afford,q?,e?,e?,e?,e?,abandon,zoo",
         &None,
     )
@@ -130,7 +130,7 @@ pub async fn benchmark_seed() {
 #[allow(dead_code)]
 pub async fn benchmark_combinations3() {
     let mut list = vec![];
-    for i in 0..9 {
+    for _ in 0..9 {
         list.push(vec![0; 10]);
     }
     let mut combinations = Combinations::permute(list, vec![], 9);
@@ -169,7 +169,10 @@ pub async fn benchmark_combinations3() {
 #[allow(dead_code)]
 pub fn dicts() {
     let root = PathBuf::from("dicts");
-    for (count, name) in vec![10, 1000, 10_000, 100_000].iter().zip(vec!["test", "1k", "10k", "100k"]) {
+    for (count, name) in vec![10, 1000, 10_000, 100_000]
+        .iter()
+        .zip(vec!["test", "1k", "10k", "100k"])
+    {
         for kind in vec!["", "_upper", "_cap"] {
             let path = root.join("norvig.com_ngrams_count_1w.txt");
             let raw = File::open(path).expect("File exists");
@@ -182,7 +185,7 @@ pub fn dicts() {
                     continue;
                 }
 
-                let mut word: &str = line.split("\t").next().unwrap();
+                let word: &str = line.split("\t").next().unwrap();
                 if kind == "_upper" {
                     writeln!(file, "{}", word.to_uppercase()).unwrap();
                 } else if kind == "_cap" {

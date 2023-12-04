@@ -1,15 +1,15 @@
 use std::cmp::max;
 use std::io::{stdout, Write};
-use std::ops::{Add, Sub};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::ops::Sub;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use crossterm::{ExecutableCommand};
 use crossterm::cursor::*;
 use crossterm::style::StyledContent;
 use crossterm::style::Stylize;
 use crossterm::terminal::{Clear, ClearType};
-use crossterm::{ExecutableCommand, QueueableCommand};
 use tokio::spawn;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
@@ -18,20 +18,6 @@ pub trait Attempt {
     fn total(&self) -> u64;
     fn begin(&self) -> String;
     fn end(&self) -> String;
-}
-
-impl Attempt for Vec<String> {
-    fn total(&self) -> u64 {
-        self.len() as u64
-    }
-
-    fn begin(&self) -> String {
-        self.first().expect("exists").clone()
-    }
-
-    fn end(&self) -> String {
-        self.last().expect("exists").clone()
-    }
 }
 
 const MINUTE: u64 = 60;
@@ -46,45 +32,62 @@ pub struct Logger {
 pub struct Timer {
     name: String,
     oneliner: bool,
-    total: u64,
-    pub counter: Arc<AtomicU64>,
+    total: Arc<AtomicU64>,
+    end: Arc<AtomicU64>,
+    counter: Arc<AtomicU64>,
     multiplier: u64,
+    log: Logger
 }
 
 impl Timer {
-    pub async fn start(&self, log: Logger) -> JoinHandle<()> {
-        self.start_at(log, 0).await
+    pub fn add(&self, amt: u64) {
+        self.counter.fetch_add(amt, Ordering::Relaxed);
     }
 
-    pub async fn start_at(&self, log: Logger, secs: u64) -> JoinHandle<()> {
+    pub fn store(&self, amt: u64) {
+        self.counter.store(amt, Ordering::Relaxed);
+    }
+
+    pub fn end(&self) {
+        self.end.store(1, Ordering::Relaxed);
+    }
+
+    pub async fn start(&self) -> JoinHandle<()> {
+        self.start_at(0).await
+    }
+
+    pub async fn start_at(&self, secs: u64) -> JoinHandle<()> {
         let name = self.name.clone();
         let oneliner = self.oneliner.clone();
         let total = self.total.clone();
+        let end = self.end.clone();
         let counter = self.counter.clone();
         let multiplier = self.multiplier.clone();
+        let log = self.log.clone();
 
         spawn(async move {
-            let mut now = Instant::now().sub(Duration::from_secs(secs));
-            let mut old_count = 0;
+            let now = Instant::now().sub(Duration::from_secs(secs));
+            let mut old_count = u64::MAX;
             let name = name.as_str().bold();
 
             loop {
                 sleep(Duration::from_millis(200)).await;
-                let mut count = counter
+                let count = counter
                     .fetch_add(0, Ordering::Relaxed)
                     .saturating_mul(multiplier);
+                let end = end.fetch_add(0, Ordering::Relaxed);
 
                 // Don't print if the count hasn't changed
-                if count == old_count {
+                if count == old_count && end == 0 {
                     continue;
                 }
-
-                if !oneliner && old_count == 0 {
-                    log.println("\n\n\n\n".stylize());
+                if end != 0 {
+                    total.store(count, Ordering::Relaxed);
                 }
+                let total = total.fetch_add(0, Ordering::Relaxed);
 
-                if count > total {
-                    count = total;
+                if !oneliner && old_count == u64::MAX {
+                    log.println("\n\n\n\n".stylize());
                 }
 
                 old_count = count;
@@ -129,6 +132,9 @@ impl Timer {
     }
 
     fn format_eta(percent: f64, secs: u64) -> String {
+        if percent.is_nan() || percent == 0.0 {
+            return "Unknown".to_string()
+        }
         Self::format_time((secs as f64 * (100.0 / percent)) as u64 - secs)
     }
 
@@ -165,9 +171,11 @@ impl Logger {
         Timer {
             name: name.to_string(),
             oneliner: true,
-            total,
+            total: Arc::new(AtomicU64::new(total)),
+            end: Arc::new(Default::default()),
             counter: Arc::new(Default::default()),
             multiplier: 1,
+            log: self.clone(),
         }
     }
 
@@ -175,9 +183,11 @@ impl Logger {
         Timer {
             name: name.to_string(),
             oneliner: false,
-            total,
+            total: Arc::new(AtomicU64::new(total)),
+            end: Arc::new(Default::default()),
             counter: Arc::new(Default::default()),
             multiplier,
+            log: self.clone(),
         }
     }
 
@@ -195,6 +205,14 @@ impl Logger {
         if self.is_logging {
             stdout.write_all(output.to_string().as_bytes()).unwrap();
             stdout.flush().unwrap();
+        }
+    }
+
+    pub fn println_err(&self, output: &str) {
+        let mut split = output.split("\n");
+        self.print("\nError: ".dark_red().bold());
+        while let Some(line) = split.next() {
+            self.println(line.stylize());
         }
     }
 
@@ -251,6 +269,24 @@ impl Logger {
 #[cfg(test)]
 mod tests {
     use crate::logger::*;
+
+    #[tokio::test]
+    async fn timer_starts_and_ends() {
+        let timer = Logger::off().time("", 100).await;
+        let handle = timer.start().await;
+        timer.add(100);
+        handle.await.unwrap();
+        assert_eq!(timer.total.fetch_add(0,  Ordering::Relaxed), 100);
+        assert_eq!(timer.counter.fetch_add(0,  Ordering::Relaxed), 100);
+
+        let timer = Logger::off().time("", 100).await;
+        let handle = timer.start().await;
+        timer.add(50);
+        timer.end();
+        handle.await.unwrap();
+        assert_eq!(timer.total.fetch_add(0,  Ordering::Relaxed), 50);
+        assert_eq!(timer.counter.fetch_add(0,  Ordering::Relaxed), 50);
+    }
 
     #[test]
     fn formats_nums() {
