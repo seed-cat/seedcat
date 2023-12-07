@@ -1,15 +1,148 @@
+use crossterm::style::Stylize;
 use std::fs::File;
 use std::io;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 
 use crate::combination::Combinations;
-use crate::logger::Attempt;
+use crate::logger::{Attempt, Logger, Timer};
 use crate::permutations::Permutations;
-use crate::seed::Seed;
+use crate::seed::{Finished, Seed};
+use crate::tests::Test;
+use crate::{log_finished, BenchOption};
+
+static BENCH_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+struct Benchmark {
+    name: String,
+    args: String,
+    timer: Option<Timer>,
+    wall_time: u64,
+    derivations: String,
+    is_fast: bool,
+}
+
+impl Benchmark {
+    fn new(name: &str, args: &str) -> Self {
+        Self::with_derivations(name, "m/0/0", args)
+    }
+
+    fn with_derivations(name: &str, derivations: &str, args: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            args: args.to_string(),
+            derivations: derivations.to_string(),
+            timer: None,
+            wall_time: 0,
+            is_fast: false,
+        }
+    }
+
+    fn with_fast(mut self) -> Self {
+        self.is_fast = true;
+        self
+    }
+}
+
+pub async fn run_benchmarks(option: BenchOption) {
+    let mut benchmarks = vec![];
+    // dad moral begin apology cheap vast clerk limb shaft salt citizen awesome
+    // aim twin nest escape combine lady grant ocean olympic post silent exist burger amateur physical muscle blossom series because dress cradle zone kick dove
+    benchmarks.push(Benchmark::new("Master XPUB (mask attack)", "-s dad,moral,begin,apology,cheap,vast,clerk,limb,shaft,salt,citizen,awesome -p ?l?d?d?d?d?d?d -a xpub661MyMwAqRbcEZjJh7cPj6aGJ9NpRDUfpNz65bLKQQKR6dznUoszbxGyF7JUeCCNdYyboeD9EnRGgz8UfZW2hMzMBXA7SLumhtMU8VWy65L").with_fast());
+    benchmarks.push(Benchmark::with_derivations("1000 derivations (mask attack)", "m/0/?9h/?9/?9", "-s dad,moral,begin,apology,cheap,vast,clerk,limb,shaft,salt,citizen,awesome -p ?l?d?d?d -a 18FkAx3zZNwmm6iTCcpHFxrrbs5sgKC6Wf"));
+    benchmarks.push(Benchmark::with_derivations("100 derivations (mask attack)", "m/0/5h/?9/?9", "-s dad,moral,begin,apology,cheap,vast,clerk,limb,shaft,salt,citizen,awesome -p ?l?d?d?d?d -a 1EtMfpkU1PyGnTYraoV2RrZEMgEijbRxLg").with_fast());
+    benchmarks.push(Benchmark::with_derivations("10 derivations (mask attack)", "m/0/5h/5/?9", "-s dad,moral,begin,apology,cheap,vast,clerk,limb,shaft,salt,citizen,awesome -p ?l?d?d?d?d?d -a 18dAXjq3NG5uVBxe1cpcwrxfvJxeDWy9oQ").with_fast());
+    benchmarks.push(Benchmark::new("1 derivations (mask attack)", "-s dad,moral,begin,apology,cheap,vast,clerk,limb,shaft,salt,citizen,awesome -p ?l?d?d?d?d?d?d -a 1A8nieZBBmXbwb4kvVpXBRdEpCaekiRhHH").with_fast());
+    benchmarks.push(Benchmark::new("Missing first words of 12", "-s ?,?,begin,apology,cheap,v?,clerk,limb,shaft,salt,citizen,awesome -a 13PciouesvLmVAvmNxW4RhZyDkCGuqpwRY"));
+    benchmarks.push(Benchmark::new("Missing first words of 24", "-s ?,?,nest,escape,combine,lady,grant,ocean,olympic,post,s?,exist,burger,amateur,physical,muscle,blossom,series,because,dress,cradle,zone,kick,dove -a 18qfTDrgRZa3ASKy6erJUCWLARaiFNyLty"));
+    benchmarks.push(Benchmark::new("Permute 12 of 12 words", "-s dad,moral,begin,apology,cheap,vast,clerk,limb,shaft,salt,awesome,citizen -c 12 -a 13PciouesvLmVAvmNxW4RhZyDkCGuqpwRY"));
+    benchmarks.push(Benchmark::new("Permute 12 of 24 words", "-s ^ai?,^twin,^nest,^escape,^combine,^lady,^grant,^ocean,^olympic,^post,^silent,^exist,burger,amateur,physical,muscle,blossom,series,because,dress,cradle,zone,dove,kick -c 24 -a 18qfTDrgRZa3ASKy6erJUCWLARaiFNyLty"));
+    benchmarks.push(Benchmark::new("Missing last words of 12", "-s dad,moral,begin,apology,cheap,v?,clerk,limb,shaft,salt,?,? -a 13PciouesvLmVAvmNxW4RhZyDkCGuqpwRY").with_fast());
+    benchmarks.push(Benchmark::new("Missing last words of 24", "-s aim,twin,nest,escape,combine,lady,grant,ocean,olympic,post,s?,exist,burger,amateur,physical,muscle,blossom,series,because,dress,cradle,zone,?,? -a 18qfTDrgRZa3ASKy6erJUCWLARaiFNyLty"));
+    benchmarks.push(Benchmark::new("Passphrase dict attack", "-s dad,moral,begin,apology,cheap,vast,clerk,limb,shaft,salt,citizen,awesome -p ./dicts/10k.txt,~,./dicts/1k_upper.txt -a 17whoxEdasBPiEWKU1kjreNBaGBDzp2woS"));
+    benchmarks.push(Benchmark::new("Passphrase dict+dict attack", "-s dad,moral,begin,apology,cheap,vast,clerk,limb,shaft,salt,citizen,awesome -p ./dicts/10k.txt,~ ./dicts/1k_upper.txt -a 17whoxEdasBPiEWKU1kjreNBaGBDzp2woS"));
+    benchmarks.push(Benchmark::new("Passphrase dict+mask attack", "-s dad,moral,begin,apology,cheap,vast,clerk,limb,shaft,salt,citizen,awesome -p ./dicts/10k.txt ~?d?d?d -a 1CnKNvDUaEQ6ybR6GN56wBsPYKnFd3ZRDa"));
+    benchmarks.push(Benchmark::new("Small passphrase + seed", "-s ?,?,begin,apology,cheap,vast,clerk,limb,shaft,salt,citizen,awesome -p ?d?d -a 1DrJAfW6TY6X3q6SBmZHAUddfodzEuz6Mg").with_fast());
+    benchmarks.push(Benchmark::new("Large passphrase + seed", "-s ?,moral,begin,apology,cheap,vast,clerk,limb,shaft,salt,citizen,awesome -p ?d?d?d?d?d -a 1FRm26FwcVtnRe2q8fHdd9c11UEEH5EYUo"));
+
+    let log = Logger::new();
+    for benchmark in &mut benchmarks {
+        if option.pass {
+            let out = format!("\n\n\n\n\nRunning passing benchmark '{}'", benchmark.name);
+            log.println(out.as_str().bold().dark_cyan());
+            let finished = run_benchmark(benchmark, &log, false, false).await;
+            assert!(finished.seed.is_some());
+        }
+
+        if option.slow || option.exhaust {
+            let out = format!(
+                "\n\n\n\n\nRunning exhausting benchmark '{}'",
+                benchmark.name
+            );
+            log.println(out.as_str().bold().dark_cyan());
+            let finished = run_benchmark(benchmark, &log, true, option.slow).await;
+            assert!(finished.seed.is_none());
+        }
+    }
+
+    let table = log.table(vec![
+        "Benchmark Name              ",
+        "Guesses  ",
+        "Speed   ",
+        "GPU Speed",
+        "Time     ",
+        "Wall Time",
+    ]);
+    table.log_heading();
+    for benchmark in benchmarks {
+        if let Some(timer) = benchmark.timer {
+            let guesses = Logger::format_num(timer.count());
+            let recovery_time = Timer::format_time(timer.seconds());
+            let wall_time = Timer::format_time(benchmark.wall_time);
+            table.log_row(vec![
+                benchmark.name,
+                guesses,
+                timer.speed() + "/sec",
+                timer.gpu_speed() + "/sec",
+                recovery_time,
+                wall_time,
+            ]);
+        }
+    }
+}
+
+async fn run_benchmark(
+    benchmark: &mut Benchmark,
+    log: &Logger,
+    exhaust: bool,
+    slow: bool,
+) -> Finished {
+    let id = BENCH_COUNT.fetch_add(1, Ordering::Relaxed);
+    let mut derivation = benchmark.derivations.clone();
+    let mut args = benchmark.args.clone();
+    if slow && benchmark.is_fast {
+        args = args.replace("?d ", "?d?d ");
+        args = args.replace("v?", "?");
+    }
+    if exhaust {
+        derivation = derivation.replace("m/0", "m/1");
+        args = args.replace("awesome", "flower");
+    }
+    let name = format!("hc_bench{}", id);
+    let args = format!("-d {} {}", derivation, args);
+    let mut hashcat = Test::configure(&name, &args, &log);
+
+    let now = Instant::now();
+    let (timer, finished) = hashcat.run(&log).await.unwrap();
+    benchmark.timer = Some(timer);
+    benchmark.wall_time = now.elapsed().as_secs();
+    log_finished(&finished, &log);
+    finished
+}
 
 #[allow(dead_code)]
 pub async fn benchmark_permutations() {

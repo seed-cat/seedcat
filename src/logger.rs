@@ -1,15 +1,15 @@
 use std::cmp::max;
 use std::io::{stdout, Write};
 use std::ops::Sub;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crossterm::{ExecutableCommand};
 use crossterm::cursor::*;
 use crossterm::style::StyledContent;
 use crossterm::style::Stylize;
 use crossterm::terminal::{Clear, ClearType};
+use crossterm::ExecutableCommand;
 use tokio::spawn;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
@@ -29,17 +29,66 @@ pub struct Logger {
     is_logging: bool,
 }
 
+pub struct TableFormat {
+    headings: Vec<String>,
+    log: Logger,
+}
+
+impl TableFormat {
+    pub fn log_heading(&self) {
+        let headings = self.headings.join("\t|");
+        self.log.println(headings.as_str().bold());
+    }
+
+    pub fn format(&self, row: Vec<String>) -> String {
+        let mut padded = vec![];
+        for i in 0..row.len() {
+            let len = self.headings[i].len();
+            padded.push(format!("{: <1$}", row[i], len));
+        }
+        padded.join("\t|")
+    }
+
+    pub fn log_row(&self, row: Vec<String>) {
+        self.log.println(self.format(row).as_str().stylize());
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Timer {
     name: String,
     oneliner: bool,
     total: Arc<AtomicU64>,
     end: Arc<AtomicU64>,
     counter: Arc<AtomicU64>,
+    seconds: Arc<AtomicU64>,
     multiplier: u64,
-    log: Logger
+    log: Logger,
 }
 
 impl Timer {
+    pub fn seconds(&self) -> u64 {
+        max(self.seconds.fetch_add(0, Ordering::Relaxed), 1)
+    }
+
+    pub fn count(&self) -> u64 {
+        self.counter
+            .fetch_add(0, Ordering::Relaxed)
+            .saturating_mul(self.multiplier)
+    }
+
+    pub fn gpu_speed(&self) -> String {
+        Logger::format_num(self.count() / self.seconds() / self.multiplier)
+    }
+
+    pub fn speed(&self) -> String {
+        Logger::format_num(self.count() / self.seconds())
+    }
+
+    pub fn multiplier(&self) -> u64 {
+        self.multiplier
+    }
+
     pub fn add(&self, amt: u64) {
         self.counter.fetch_add(amt, Ordering::Relaxed);
     }
@@ -57,48 +106,45 @@ impl Timer {
     }
 
     pub async fn start_at(&self, secs: u64) -> JoinHandle<()> {
-        let name = self.name.clone();
-        let oneliner = self.oneliner.clone();
-        let total = self.total.clone();
-        let end = self.end.clone();
-        let counter = self.counter.clone();
-        let multiplier = self.multiplier.clone();
-        let log = self.log.clone();
+        let timer = self.clone();
 
         spawn(async move {
             let now = Instant::now().sub(Duration::from_secs(secs));
             let mut old_count = u64::MAX;
-            let name = name.as_str().bold();
+            let name = timer.name.as_str().bold();
 
             loop {
                 sleep(Duration::from_millis(200)).await;
-                let count = counter
-                    .fetch_add(0, Ordering::Relaxed)
-                    .saturating_mul(multiplier);
-                let end = end.fetch_add(0, Ordering::Relaxed);
+                let count = timer.count();
+                let end = timer.end.fetch_add(0, Ordering::Relaxed);
 
                 // Don't print if the count hasn't changed
                 if count == old_count && end == 0 {
                     continue;
                 }
                 if end != 0 {
-                    total.store(count, Ordering::Relaxed);
+                    timer.total.store(count, Ordering::Relaxed);
                 }
-                let total = total.fetch_add(0, Ordering::Relaxed);
+                let total = timer.total.fetch_add(0, Ordering::Relaxed);
 
-                if !oneliner && old_count == u64::MAX {
-                    log.println("\n\n\n\n".stylize());
+                if !timer.oneliner && old_count == u64::MAX {
+                    timer.log.println("\n\n\n\n\n".stylize());
                 }
 
                 old_count = count;
-                let seconds = max(1, now.elapsed().as_secs());
+                timer
+                    .seconds
+                    .store(now.elapsed().as_secs(), Ordering::Relaxed);
+                let seconds = timer.seconds();
 
-                let percent = (count as f64 / total as f64) * 100.0;
+                let mut percent = (count as f64 / total as f64) * 100.0;
+                if percent > 100.0 {
+                    percent = 100.0;
+                }
                 let count_str = Logger::format_num(count);
                 let total_str = Logger::format_num(total);
-                let speed = format!("Speed....: {}/sec", Logger::format_num(count / seconds));
-                let gpu_speed = Logger::format_num(count / seconds / multiplier);
-                let gpu = format!("GPU Speed: {}/sec", gpu_speed);
+                let speed = format!("Speed....: {}/sec", timer.speed());
+                let gpu = format!("GPU Speed: {}/sec", timer.gpu_speed());
                 let progress = format!(" {:.2}% ({}/{})", percent, count_str, total_str);
                 let eta = format!("ETA......: {}", Self::format_eta(percent, seconds));
                 let elapsed = format!("Elapsed..: {}", Self::format_time(seconds));
@@ -108,13 +154,13 @@ impl Timer {
                 );
 
                 let mut stdout = stdout();
-                if log.is_logging && oneliner {
+                if timer.log.is_logging && timer.oneliner {
                     stdout.execute(MoveLeft(1000)).unwrap();
                     stdout.execute(Clear(ClearType::FromCursorDown)).unwrap();
                     stdout.write_all(name.to_string().as_bytes()).unwrap();
                     stdout.write_all(progress.to_string().as_bytes()).unwrap();
                     stdout.flush().unwrap();
-                } else if log.is_logging {
+                } else if timer.log.is_logging {
                     stdout.execute(MoveLeft(1000)).unwrap();
                     stdout.execute(MoveUp(6)).unwrap();
                     stdout.execute(Clear(ClearType::FromCursorDown)).unwrap();
@@ -124,7 +170,7 @@ impl Timer {
                     stdout.flush().unwrap();
                 }
                 if count == total {
-                    log.println("\n".stylize());
+                    timer.log.println("\n".stylize());
                     break;
                 }
             }
@@ -132,13 +178,20 @@ impl Timer {
     }
 
     fn format_eta(percent: f64, secs: u64) -> String {
-        if percent.is_nan() || percent == 0.0 {
-            return "Unknown".to_string()
+        if percent == 100.0 {
+            return "N/A".to_string();
         }
-        Self::format_time((secs as f64 * (100.0 / percent)) as u64 - secs)
+        if percent.is_nan() || percent == 0.0 {
+            return "Unknown".to_string();
+        }
+        let remaining = (secs as f64 * (100.0 / percent)) as u64;
+        if remaining <= secs {
+            return "Unknown".to_string();
+        }
+        Self::format_time(remaining - secs)
     }
 
-    fn format_time(mut remaining: u64) -> String {
+    pub fn format_time(mut remaining: u64) -> String {
         let mut output = vec![];
 
         if remaining / DAY > 0 {
@@ -167,6 +220,13 @@ impl Logger {
         Self { is_logging: false }
     }
 
+    pub fn table(&self, heading: Vec<&str>) -> TableFormat {
+        TableFormat {
+            headings: heading.iter().map(|s| s.to_string()).collect(),
+            log: self.clone(),
+        }
+    }
+
     pub async fn time(&self, name: &str, total: u64) -> Timer {
         Timer {
             name: name.to_string(),
@@ -174,6 +234,7 @@ impl Logger {
             total: Arc::new(AtomicU64::new(total)),
             end: Arc::new(Default::default()),
             counter: Arc::new(Default::default()),
+            seconds: Arc::new(Default::default()),
             multiplier: 1,
             log: self.clone(),
         }
@@ -186,6 +247,7 @@ impl Logger {
             total: Arc::new(AtomicU64::new(total)),
             end: Arc::new(Default::default()),
             counter: Arc::new(Default::default()),
+            seconds: Arc::new(Default::default()),
             multiplier,
             log: self.clone(),
         }
@@ -193,7 +255,7 @@ impl Logger {
 
     pub fn heading(&self, output: &str) {
         self.print(
-            format!("\n--- {} ---\n", output)
+            format!("\n============ {} ============\n", output)
                 .as_str()
                 .dark_green()
                 .bold(),
@@ -229,7 +291,7 @@ impl Logger {
         let total = format!("{}: ", name);
         self.print_num(&total, attempt.total());
         self.println(
-            format!("Begin: {}\nEnd:   {}\n", attempt.begin(), attempt.end())
+            format!(" Begin: {}\n End:   {}\n", attempt.begin(), attempt.end())
                 .as_str()
                 .stylize(),
         );
@@ -245,7 +307,7 @@ impl Logger {
         }
     }
 
-    fn format_num(num: u64) -> String {
+    pub fn format_num(num: u64) -> String {
         let mut thousands = num as f64;
         let mut denomination = "";
         let denominations = vec!["", "K", "M", "B", "T"];
@@ -270,22 +332,30 @@ impl Logger {
 mod tests {
     use crate::logger::*;
 
+    #[test]
+    fn formats_tables() {
+        let logger = Logger::new();
+        let table = logger.table(vec!["a---", "b", "c--"]);
+        let formatted = table.format(vec!["1".to_string(), "2".to_string(), "3".to_string()]);
+        assert_eq!(formatted, "1   \t|2\t|3  ");
+    }
+
     #[tokio::test]
     async fn timer_starts_and_ends() {
         let timer = Logger::off().time("", 100).await;
         let handle = timer.start().await;
         timer.add(100);
         handle.await.unwrap();
-        assert_eq!(timer.total.fetch_add(0,  Ordering::Relaxed), 100);
-        assert_eq!(timer.counter.fetch_add(0,  Ordering::Relaxed), 100);
+        assert_eq!(timer.total.fetch_add(0, Ordering::Relaxed), 100);
+        assert_eq!(timer.counter.fetch_add(0, Ordering::Relaxed), 100);
 
         let timer = Logger::off().time("", 100).await;
         let handle = timer.start().await;
         timer.add(50);
         timer.end();
         handle.await.unwrap();
-        assert_eq!(timer.total.fetch_add(0,  Ordering::Relaxed), 50);
-        assert_eq!(timer.counter.fetch_add(0,  Ordering::Relaxed), 50);
+        assert_eq!(timer.total.fetch_add(0, Ordering::Relaxed), 50);
+        assert_eq!(timer.counter.fetch_add(0, Ordering::Relaxed), 50);
     }
 
     #[test]

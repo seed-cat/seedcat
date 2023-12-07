@@ -2,7 +2,7 @@
 # We disable unused modules for faster and smaller compilation target
 
 set -e
-
+export PROJECT_NAME="seedcat"
 cd hashcat
 cd src
 MODULES_DISABLE=""

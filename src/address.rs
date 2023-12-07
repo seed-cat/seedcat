@@ -1,10 +1,13 @@
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
+use crate::logger::Attempt;
 use anyhow::{bail, format_err, Result};
 use bitcoin::bip32::{ChildNumber, Xpub};
 use bitcoin::{Address, Network};
-use crate::logger::Attempt;
+
+// FIXME: Need this to be low for now or status updates are too slow
+const MAX_DERIVATIONS: usize = 10;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct AddressValid {
@@ -16,7 +19,19 @@ pub struct AddressValid {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Derivations {
     derivations: Vec<String>,
-    pub arg: String
+    args: Vec<String>,
+}
+
+impl Derivations {
+    /// Args that are exploded in the hashes file
+    pub fn args(&self) -> Vec<String> {
+        self.args.clone()
+    }
+
+    /// Number of args that are exploded inside hashcat
+    pub fn hash_ratio(&self) -> f64 {
+        self.derivations.len() as f64 / self.args.len() as f64
+    }
 }
 
 impl Attempt for Derivations {
@@ -43,12 +58,11 @@ const ERR_MSG: &str = "\nDerivation path should be valid comma or path-separated
   Try to use the exact derivation path for the address you have (see https://walletsrecovery.org/)\n";
 
 impl AddressValid {
-    pub fn from_arg(address: Option<String>, derivation: &Option<String>) -> Result<Self> {
-        let formatted = address.ok_or(format_err!("--address is a required argument"))?;
-        let kind = Self::kind(&formatted)?;
+    pub fn from_arg(address: &str, derivation: &Option<String>) -> Result<Self> {
+        let kind = Self::kind(&address)?;
         let derivations = Self::derivation(&kind, derivation)?;
 
-        Ok(Self::new(formatted.clone(), kind, derivations))
+        Ok(Self::new(address.to_string(), kind, derivations))
     }
 
     pub fn new(formatted: String, kind: AddressKind, derivations: Derivations) -> Self {
@@ -87,46 +101,48 @@ impl AddressValid {
     }
 
     fn derivation(kind: &AddressKind, arg: &Option<String>) -> Result<Derivations> {
-        let output = match arg {
-            None => Derivations{
-                derivations: kind.derivations.clone(),
-                arg: kind.derivations.join(","),
-            },
+        let split = match arg {
+            None => kind.derivations.clone(),
             Some(arg) => {
-                let mut derivations = vec![];
-                let split = if arg.contains(",") {
+                let args = if arg.contains(",") {
                     arg.split(",")
                 } else {
                     arg.split(" ")
                 };
-
-                for derivation in split.clone() {
-                    let derivation = match derivation.strip_prefix("m/") {
-                        None => bail!(
-                            "Derivation path '{}' must start with 'm/'{}",
-                            derivation,
-                            ERR_MSG
-                        ),
-                        Some(str) => str,
-                    };
-
-                    derivations.extend(Self::derivation_paths(derivation)?);
-                }
-                Derivations{
-                    derivations,
-                    arg: split.into_iter().map(|s| s.to_string()).collect::<Vec<_>>().join(","),
-                }
+                args.map(|s| s.to_string()).collect()
             }
         };
 
-        return Ok(output);
+        let mut derivations = vec![];
+        let mut args = vec![];
+        for derivation in split.clone() {
+            let derivation = match derivation.strip_prefix("m/") {
+                None => bail!(
+                    "Derivation path '{}' must start with 'm/'{}",
+                    derivation,
+                    ERR_MSG
+                ),
+                Some(str) => str,
+            };
+
+            let (derivation, arg) = Self::derivation_paths(derivation, derivations.len())?;
+            derivations.extend(derivation);
+
+            if derivations.len() <= MAX_DERIVATIONS && args.len() > 0 {
+                args = Self::extend_paths(&args, &arg, ",");
+            } else {
+                args.extend(arg);
+            }
+        }
+
+        Ok(Derivations { derivations, args })
     }
 
-    fn derivation_paths(derivation: &str) -> Result<Vec<String>> {
-        let mut output = vec!["m".to_string()];
+    fn derivation_paths(derivation: &str, num_args: usize) -> Result<(Vec<String>, Vec<String>)> {
+        let mut derivations = vec!["m".to_string()];
+        let mut args = vec!["m".to_string()];
 
         for path in derivation.split("/").into_iter() {
-            let mut tmp = vec![];
             let nodes = Self::derivation_nodes(path).map_err(|err| {
                 format_err!(
                     "Bad element in derivation path '{}' {}{}",
@@ -135,15 +151,27 @@ impl AddressValid {
                     ERR_MSG
                 )
             })?;
-            for node in nodes.into_iter() {
-                for out in output.clone().into_iter() {
-                    tmp.push(format!("{}/{}", out, node));
-                }
+
+            derivations = Self::extend_paths(&derivations, &nodes, "/");
+
+            if num_args + derivations.len() > MAX_DERIVATIONS {
+                args = Self::extend_paths(&args, &nodes, "/");
+            } else {
+                args = Self::extend_paths(&args, &vec![path.to_string()], "/");
             }
-            output = tmp;
         }
 
-        return Ok(output);
+        return Ok((derivations, args));
+    }
+
+    fn extend_paths(current: &Vec<String>, nodes: &Vec<String>, delim: &str) -> Vec<String> {
+        let mut tmp = vec![];
+        for node in nodes.clone().into_iter() {
+            for out in current.clone().into_iter() {
+                tmp.push(format!("{}{}{}", out, delim, node));
+            }
+        }
+        tmp
     }
 
     fn derivation_nodes(path: &str) -> Result<Vec<String>> {
@@ -172,7 +200,7 @@ pub fn address_kinds() -> Vec<AddressKind> {
             "XPUB",
             "Master Extended Pubic Key",
             "xpub",
-            vec!["m/".to_string()],
+            vec!["m/0".to_string()],
             true,
         ),
         AddressKind::new(
@@ -258,26 +286,46 @@ mod tests {
         assert!(kind.is_err());
     }
 
-    fn derivations(arg: &str, derivations: Vec<&str>) -> Derivations {
-        Derivations {
-            derivations: derivations.into_iter().map(|s| s.to_string()).collect(),
-            arg: arg.to_string(),
-        }
-    }
-
     #[test]
     fn parses_derivations() {
         let kind = AddressKind::new("", "", "", vec!["m/123".to_string()], false);
-
         let derivation = AddressValid::derivation(&kind, &None).unwrap();
-        assert_eq!(derivation, derivations("m/123", vec!["m/123"]));
-
-        let derivation = AddressValid::derivation(&kind, &Some("m/0 m/1/?2".to_string())).unwrap();
-        assert_eq!(derivation, derivations("m/0,m/1/?2", vec!["m/0", "m/1/0", "m/1/1", "m/1/2"]));
+        assert_eq!(derivation.args(), vec!["m/123".to_string()]);
 
         let derivation = AddressValid::derivation(&kind, &Some("m/0,m/1'".to_string())).unwrap();
-        assert_eq!(derivation, derivations("m/0,m/1'", vec!["m/0", "m/1'"]));
+        assert_eq!(derivation.args(), vec!["m/0,m/1'".to_string()]);
+
+        let derivation = AddressValid::derivation(&kind, &Some("m/0 m/1/?2".to_string())).unwrap();
+        assert_eq!(derivation.args(), vec!["m/0,m/1/?2".to_string()]);
+        assert_eq!(derivation.begin(), "m/0");
+        assert_eq!(derivation.end(), "m/1/2");
+        assert_eq!(derivation.total(), 4);
+        assert_eq!(derivation.hash_ratio(), 4.0);
 
         assert!(AddressValid::derivation(&kind, &Some("z/?2".to_string())).is_err());
+
+        // splits if over 10
+        let derivation =
+            AddressValid::derivation(&kind, &Some("m/?9'/9/?9,m/0/0".to_string())).unwrap();
+        assert_eq!(derivation.begin(), "m/0'/9/0");
+        assert_eq!(derivation.end(), "m/0/0");
+        assert_eq!(derivation.total(), 101);
+        assert_eq!(derivation.hash_ratio(), 101.0 / 11.0);
+        assert_eq!(
+            derivation.args,
+            vec![
+                "m/?9'/9/0",
+                "m/?9'/9/1",
+                "m/?9'/9/2",
+                "m/?9'/9/3",
+                "m/?9'/9/4",
+                "m/?9'/9/5",
+                "m/?9'/9/6",
+                "m/?9'/9/7",
+                "m/?9'/9/8",
+                "m/?9'/9/9",
+                "m/0/0",
+            ]
+        );
     }
 }

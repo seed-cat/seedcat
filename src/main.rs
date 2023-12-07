@@ -1,15 +1,19 @@
-use std::{env, io};
 use std::io::{BufRead, Write};
-use std::path::{Path, PathBuf};
+use std::net::{SocketAddr, TcpStream};
+use std::path::Path;
 use std::process::exit;
+use std::str::FromStr;
+use std::time::Duration;
+use std::{env, io};
 
-use anyhow::{bail, format_err, Result};
-use clap::Parser;
+use anyhow::{bail, Result};
+use clap::{Args, Parser, Subcommand};
 use crossterm::style::Stylize;
 
 use crate::address::AddressValid;
-use crate::hashcat::Hashcat;
-use crate::logger::{Attempt, Logger};
+use crate::benchmarks::run_benchmarks;
+use crate::hashcat::{Hashcat, HashcatExe, HashcatRunner};
+use crate::logger::Logger;
 use crate::passphrase::Passphrase;
 use crate::seed::{Finished, Seed};
 use crate::tests::run_tests;
@@ -27,104 +31,143 @@ mod tests;
 const HASHCAT_PATH: &str = "hashcat";
 const SEPARATOR: &str = ",";
 
-#[derive(Parser)]
-#[command(author, version, about, long_about = None)]
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None, arg_required_else_help = true, args_conflicts_with_subcommands = true)]
 pub struct Cli {
+    #[command(subcommand)]
+    pub cmd: Option<CliCommand>,
+
+    #[command(flatten)]
+    pub run: Option<CliRun>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CliCommand {
+    /// Runs self-tests of the application
+    Test,
+    /// Runs benchmarks of the application
+    Bench(BenchOption),
+}
+
+#[derive(Args, Debug)]
+#[group(required = true, multiple = false)]
+pub struct BenchOption {
+    /// Runs slower for fast GPUs
+    #[arg(short = 's', long, default_value_t = false)]
+    slow: bool,
+
+    /// Checks whether benchmarks are passing
+    #[arg(short = 'p', long, default_value_t = false)]
+    pass: bool,
+
+    /// Runs benchmarks until exhaustion
+    #[arg(short = 'e', long, default_value_t = false)]
+    exhaust: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct CliRun {
     /// Address e.g. 'bc1q490...' OR master xpub key e.g. 'xpub661MyMwAqRbc...'
-    #[arg(short, long, value_name = "ADDRESS")]
-    address: Option<String>,
+    #[arg(short, long, value_name = "address")]
+    address: String,
 
     /// Seed words with wildcards e.g. 'cage,?,zo?,?be,?oo?,toward|st?,able...'
-    #[arg(short, long, value_name = "WORD WORD...")]
-    seed: Option<String>,
+    #[arg(short, long, value_name = "word word...")]
+    seed: String,
 
     /// Derivation paths with wildcards e.g. 'm/0/0,m/49h/0h/0h/?2/?10'
-    #[arg(short, long, value_name = "PATH PATH...")]
+    #[arg(short, long, value_name = "path path...")]
     derivation: Option<String>,
 
     /// Dictionaries and/or mask e.g. './dict.txt' '?l?l?l?d?1'
     #[arg(short, long, value_name = "MASK|DICT", num_args = 1.., value_delimiter = ' ')]
     passphrase: Option<Vec<String>>,
 
-    /// Choose a number of combinations for the list of seed words
-    #[arg(short, long, value_name = "# WORDS")]
+    /// Guess all permutations of a # of seed words
+    #[arg(short, long, value_name = "# words")]
     combinations: Option<usize>,
 
     /// User defined charset for use in passphrase mask attack
-    #[arg(short = '1', long, value_name = "CHARS")]
+    #[arg(short = '1', long, value_name = "chars")]
     custom_charset1: Option<String>,
 
     /// User defined charset for use in passphrase mask attack
-    #[arg(short = '2', long, value_name = "CHARS")]
+    #[arg(short = '2', long, value_name = "chars")]
     custom_charset2: Option<String>,
 
     /// User defined charset for use in passphrase mask attack
-    #[arg(short = '3', long, value_name = "CHARS")]
+    #[arg(short = '3', long, value_name = "chars")]
     custom_charset3: Option<String>,
 
     /// User defined charset for use in passphrase mask attack
-    #[arg(short = '4', long, value_name = "CHARS")]
+    #[arg(short = '4', long, value_name = "chars")]
     custom_charset4: Option<String>,
 
     /// Skips the prompt and starts immediately
     #[arg(short = 'y', long, default_value_t = false)]
     skip_prompt: bool,
 
-    /// Runs self-tests of the application
-    #[arg(short = 't', long, default_value_t = false)]
-    self_test: bool,
-
     /// Pass options directly to hashcat (https://hashcat.net/wiki/doku.php?id=hashcat)
-    #[arg(last = true, value_name = "HASHCAT OPTIONS")]
+    #[arg(last = true, value_name = "hashcat options")]
     hashcat: Vec<String>,
 }
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let cli: Cli = Cli::parse();
-    if cli.self_test {
-        run_tests().await;
+    if let Some(cmd) = cli.cmd {
+        match cmd {
+            CliCommand::Test => run_tests().await,
+            CliCommand::Bench(option) => run_benchmarks(option).await,
+        }
         exit(0);
     }
 
-    let logger = Logger::new();
-    let mut hashcat = match configure(&cli, &logger) {
-        Ok(hashcat) => hashcat,
-        Err(err) => return logger.println_err(&err.to_string())
-    };
-    let finished = match hashcat.run(&cli.hashcat, &logger).await {
-        Ok(finished) => finished,
-        Err(err) => return logger.println_err(&err.to_string())
-    };
+    if let Some(run) = cli.run {
+        let log = Logger::new();
+        let mut hashcat = match configure(&run, &log) {
+            Ok(hashcat) => hashcat,
+            Err(err) => return log.println_err(&err.to_string()),
+        };
+        let (_, finished) = match hashcat.run(&log).await {
+            Ok(finished) => finished,
+            Err(err) => return log.println_err(&err.to_string()),
+        };
+        log_finished(&finished, &log);
+    }
+}
 
+pub fn log_finished(finished: &Finished, log: &Logger) {
     match finished {
         Finished {
             seed: Some(seed),
             passphrase: Some(passphrase),
             ..
         } => {
-            logger.print("Found Seed: ".dark_green().bold());
-            logger.println(seed.as_str().stylize());
+            log.print("Found Seed: ".dark_green().bold());
+            log.println(seed.as_str().stylize());
             if !passphrase.is_empty() {
-                logger.print("Found Passphrase: ".dark_green().bold());
-                logger.println(passphrase.as_str().stylize());
+                log.print("Found Passphrase: ".dark_green().bold());
+                log.println(passphrase.as_str().stylize());
             }
         }
-        _ => logger.println_err("Exhausted search with no results...try with different parameters"),
+        _ => log.println(
+            "Exhausted search with no results...try with different parameters"
+                .bold()
+                .dark_red(),
+        ),
     }
-    logger.println("".stylize());
+    log.println("".stylize());
 }
 
-pub fn configure(cli: &Cli, log: &Logger) -> Result<Hashcat> {
-    log.heading("Seedcat Configuration");
+pub fn configure(cli: &CliRun, log: &Logger) -> Result<Hashcat> {
     let exe = validate_exe()?;
 
     let seed_arg = cli.seed.clone();
-    let seed = seed_arg.ok_or(format_err!("--seed is a required argument"))?;
-    let seed = Seed::from_args(&seed, &cli.combinations)?;
+    let seed = Seed::from_args(&seed_arg, &cli.combinations)?;
     seed.validate_length()?;
 
-    let address = AddressValid::from_arg(cli.address.clone(), &cli.derivation)?;
+    let address = AddressValid::from_arg(&cli.address, &cli.derivation)?;
 
     let passphrase = match &cli.passphrase {
         None => None,
@@ -139,43 +182,50 @@ pub fn configure(cli: &Cli, log: &Logger) -> Result<Hashcat> {
         }
     };
 
+    log.heading("Seedcat Configuration");
     let format_address = format!("{} ({}) Address: ", address.kind.key, address.kind.name);
     log.print(format_address.as_str().bold());
-    log.println(format!("{}\n", address.formatted).as_str().stylize());
+    log.println(format!("\n {}\n", address.formatted).as_str().stylize());
     log.format_attempt("Derivations", &address.derivations);
     log.format_attempt("Seeds", &seed);
     if let Some(passphrase) = &passphrase {
         log.format_attempt("Passphrases", passphrase);
     }
 
-    // log.print_num("Valid seeds: ", seed.valid_seeds());
     if seed.valid_seeds() == 0 {
         bail!("All possible seeds have invalid checksums")
     }
-    let hashcat = Hashcat::new(exe, address.clone(), seed, passphrase);
+    let args = cli.hashcat.clone();
+    let hashcat = Hashcat::new(exe, address.clone(), seed, passphrase, args);
 
     if hashcat.total() == u64::MAX {
         bail!("Exceeding 2^64 attempts will take forever to run, try reducing combinations");
     }
     log.print_num("Total Guesses: ", hashcat.total());
 
-    if hashcat.uses_binary_charsets()? {
-        log.print(
-            "Pure GPU Mode: Can run on large GPU clusters (using binary charsets)\n".dark_green(),
-        );
-    } else if hashcat.pure_gpu()? {
-        log.print("Pure GPU Mode: Can run on large GPU clusters\n".dark_green());
-    } else if !hashcat.within_max_hashes() {
-        log.print("Stdin Mode: CPU-limited due to many seeds to guess\n".dark_yellow());
-    } else if !hashcat.has_enough_passphrases() {
-        log.print("Stdin Mode: CPU-limited due to not enough passphrases to guess\n".dark_yellow());
+    let mode = hashcat.get_mode()?;
+    match mode.runner {
+        HashcatRunner::PureGpu => {
+            log.print(" Pure GPU Mode: Can run on large GPU clusters\n".stylize())
+        }
+        HashcatRunner::BinaryCharsets(_, _) => log.print(
+            " Pure GPU Mode: Can run on large GPU clusters (using binary charsets)\n".stylize(),
+        ),
+        HashcatRunner::StdinMaxHashes => log.print(
+            " Stdin Mode: CPU-limited due to a large number of seeds to guess\n".dark_yellow(),
+        ),
+        HashcatRunner::StdinMinPassphrases => log.print(
+            " Stdin Mode: CPU-limited due to not enough passphrases to guess\n".dark_yellow(),
+        ),
     }
-    if address.derivations.total() > 100 {
-        log.println("Note: More than 100 derivations will slow status updates".dark_yellow())
+    if has_internet() {
+        log.println(
+            " Warning: For better security turn off your internet connection".dark_yellow(),
+        );
     }
 
     if !cli.skip_prompt {
-        prompt_continue();
+        prompt_continue(log);
     }
 
     log.heading("Seedcat Recovery");
@@ -183,8 +233,14 @@ pub fn configure(cli: &Cli, log: &Logger) -> Result<Hashcat> {
     Ok(hashcat)
 }
 
-fn prompt_continue() {
-    print!("\nContinue with recovery [Y/n]? ");
+fn has_internet() -> bool {
+    // See if we can connect to Google
+    let socket = SocketAddr::from_str("209.85.233.101:80").expect("Valid socket");
+    TcpStream::connect_timeout(&socket, Duration::from_millis(100)).is_ok()
+}
+
+fn prompt_continue(log: &Logger) {
+    log.print("\nContinue with recovery [Y/n]? ".stylize());
     io::stdout().flush().unwrap();
     let mut line = String::new();
     let stdin = io::stdin();
@@ -194,7 +250,7 @@ fn prompt_continue() {
     }
 }
 
-fn validate_exe() -> Result<PathBuf> {
+fn validate_exe() -> Result<HashcatExe> {
     let platform = match env::consts::FAMILY {
         "unix" => "hashcat.bin",
         "windows" => "hashcat.exe",
@@ -204,11 +260,13 @@ fn validate_exe() -> Result<PathBuf> {
     let hashcat = Path::new(HASHCAT_PATH);
     for executable in [platform, "hashcat"] {
         if hashcat.join(executable).exists() {
-            return Ok(hashcat.join(executable));
+            if let Ok(exe) = std::fs::canonicalize(hashcat.join(executable)) {
+                return Ok(HashcatExe::new(exe));
+            }
         }
     }
     bail!(
-        "Could not find executable '{}' make sure you are running in the directory with the 'hashcat' folder",
-        hashcat.join(platform).to_str().unwrap()
+        "Could not find executable '{}'...make sure you are running in 'seedcat' directory",
+        hashcat.join(platform).to_str().unwrap(),
     );
 }

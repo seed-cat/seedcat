@@ -1,6 +1,7 @@
 # Tests for when working on the hashcat module
 
 set -e
+source ./scripts/configure_hashcat.sh
 
 if [ -z $1 ]; then
   echo "Usage ./scripts/test_hashcat.sh <test|run|bench> <#|all> [clean]"
@@ -11,7 +12,6 @@ if [ -z $1 ]; then
   exit 1
 fi
 
-source ./scripts/configure_hashcat.sh
 rm -f modules/module_28510.so
 rm -f kernels/*
 rm -f hashcat.potfile

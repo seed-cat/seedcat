@@ -3,11 +3,11 @@ use std::fs::File;
 use std::io;
 use std::path::PathBuf;
 
-use anyhow::{bail, Error, format_err, Result};
+use anyhow::{bail, format_err, Error, Result};
 
 use crate::combination::Combinations;
 use crate::logger::{Attempt, Logger};
-use crate::SEPARATOR;
+use crate::{HASHCAT_PATH, SEPARATOR};
 
 const ERR_MSG: &str = "\nPassphrase takes at most 2 args with the following possibilities:
   DICT attack:            --passphrase 'prefix,./dicts/dict.txt,suffix'
@@ -121,10 +121,12 @@ impl Passphrase {
         }
 
         if let PassphraseArg::Mask(ref mut m) = &mut copy.left {
-            let bits11 =
-                format!("?{}?{}", wildcards[0].flag, wildcards[1].flag).repeat(guesses - 1);
-            let bits = format!("{}?{}", bits11, wildcards[2].flag);
-            m.arg = format!("{}{}", bits, m.arg);
+            m.prefix_wild(&wildcards[2]);
+            for _ in 1..guesses {
+                m.prefix_wild(&wildcards[1]);
+                m.prefix_wild(&wildcards[0]);
+            }
+
             return Ok(Some(copy));
         }
         Ok(None)
@@ -264,13 +266,15 @@ impl UserCharsets {
 
     pub fn add_binary_charsets(&mut self, entropy_bits: usize) -> Result<Vec<Wildcard>> {
         let mut bin = vec![entropy_bits, 6, 5];
+        let mut totals = vec![2_u64.pow(entropy_bits as u32), 2_u64.pow(6), 2_u64.pow(5)];
         let mut wildcards = vec![];
         for i in 1..=4 {
             if self.charsets.contains_key(&i) {
                 continue;
             }
             if let Some(bin) = bin.pop() {
-                let wildcard = Wildcard::new_binary(i, bin)?;
+                let total = totals.pop().unwrap();
+                let wildcard = Wildcard::new_binary(i, bin, total)?;
                 self.charsets.insert(i, wildcard.clone());
                 wildcards.push(wildcard);
             }
@@ -348,6 +352,11 @@ impl Mask {
         Self::new("", 1, "", "")
     }
 
+    fn prefix_wild(&mut self, wildcard: &Wildcard) {
+        self.total = self.total.saturating_mul(wildcard.length);
+        self.arg = format!("?{}{}", wildcard.flag, self.arg);
+    }
+
     fn new(arg: &str, total: u64, start: &str, end: &str) -> Self {
         Self {
             arg: arg.to_string(),
@@ -391,21 +400,28 @@ impl Wildcard {
         }
     }
 
-    fn new_binary(num: usize, bin: usize) -> Result<Self> {
-        let root = PathBuf::new().join("hashcat").join("charsets").join("bin");
-        let path = root.join(format!("{}bit.hcchr", bin));
-        if !path.exists() {
-            bail!("Could not find file '{:?}' make sure you are running in the directory with the 'hashcat' folder", path);
+    fn new_binary(num: usize, bin: usize, total: u64) -> Result<Self> {
+        let root1 = PathBuf::new()
+            .join(HASHCAT_PATH)
+            .join("charsets")
+            .join("bin");
+        let root2 = PathBuf::new().join("charsets").join("bin");
+
+        for root in [root1.clone(), root2] {
+            let path = root.join(format!("{}bit.hcchr", bin));
+            if path.exists() {
+                let path = path.to_str().expect("Is valid path");
+                return Ok(Self {
+                    flag: num.to_string().chars().next().unwrap(),
+                    display: path.to_string(),
+                    length: total,
+                    example_start: "".to_string(),
+                    example_end: "".to_string(),
+                    charset: Some(path.to_string()),
+                });
+            }
         }
-        let path = path.to_str().expect("Is valid path");
-        Ok(Self {
-            flag: num.to_string().chars().next().unwrap(),
-            display: path.to_string(),
-            length: 1,
-            example_start: "".to_string(),
-            example_end: "".to_string(),
-            charset: Some(path.to_string()),
-        })
+        bail!("Could not find file '{:?}' make sure you are running in the directory with the '{}' folder", root1, HASHCAT_PATH);
     }
 
     fn new_custom(num: usize, display: &String) -> Result<Self> {
@@ -458,6 +474,7 @@ fn wildcards(charsets: &UserCharsets) -> Result<BTreeMap<char, Wildcard>> {
 #[cfg(test)]
 mod tests {
     use crate::passphrase::*;
+    use std::fs::remove_file;
 
     #[tokio::test]
     async fn passphrase_generates_args() {
@@ -473,20 +490,21 @@ mod tests {
             &vec![None, Some("a".to_string())],
         )
         .unwrap();
-        let pp_with_bin = pp.add_binary_charsets(3, 2).unwrap();
-        let args = pp_with_bin.unwrap().build_args("", &Logger::off()).await;
+        let pp_with_bin = pp.add_binary_charsets(3, 2).unwrap().unwrap();
         assert_args(
-            args,
+            pp_with_bin.build_args("", &Logger::off()).await,
             "-a 3 ?1?3?1?3?4test?d -1 hashcat/charsets/bin/5bit.hcchr -2 a -3 hashcat/charsets/bin/6bit.hcchr -4 hashcat/charsets/bin/2bit.hcchr"
         );
+        assert_eq!(pp_with_bin.total(), 10 * 2048 * 2048 * 2_u64.pow(2));
 
         let pp = Passphrase::from_arg(&vec!["test".to_string()], &vec![]).unwrap();
-        let pp_with_bin = pp.add_binary_charsets(3, 2).unwrap();
-        let args = pp_with_bin.unwrap().build_args("hc", &Logger::off()).await;
+        let pp_with_bin = pp.add_binary_charsets(3, 3).unwrap().unwrap();
         assert_args(
-            args,
-            "-a 7 ?1?2?1?2?3 hc_right.gz -1 hashcat/charsets/bin/5bit.hcchr -2 hashcat/charsets/bin/6bit.hcchr -3 hashcat/charsets/bin/2bit.hcchr"
+            pp_with_bin.build_args("hc", &Logger::off()).await,
+            "-a 7 ?1?2?1?2?3 hc_right.gz -1 hashcat/charsets/bin/5bit.hcchr -2 hashcat/charsets/bin/6bit.hcchr -3 hashcat/charsets/bin/3bit.hcchr"
         );
+        assert_eq!(pp_with_bin.total(), 2048 * 2048 * 2_u64.pow(3));
+        remove_file("hc_right.gz").unwrap();
     }
 
     fn assert_args(args: Result<Vec<String>>, expected: &str) {
@@ -502,9 +520,9 @@ mod tests {
         assert_eq!(
             wildcards,
             vec![
-                Wildcard::new_binary(1, 5).unwrap(),
-                Wildcard::new_binary(3, 6).unwrap(),
-                Wildcard::new_binary(4, 2).unwrap()
+                Wildcard::new_binary(1, 5, 2_u64.pow(5)).unwrap(),
+                Wildcard::new_binary(3, 6, 2_u64.pow(6)).unwrap(),
+                Wildcard::new_binary(4, 2, 2_u64.pow(2)).unwrap()
             ]
         );
         let wildcards2 = charsets.add_binary_charsets(2).unwrap();

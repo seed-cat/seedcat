@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
-use anyhow::{Error, format_err, Result};
+use anyhow::{format_err, Error, Result};
 use gzp::deflate::Gzip;
 use gzp::par::compress::{ParCompress, ParCompressBuilder};
 use gzp::ZWriter;

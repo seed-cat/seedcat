@@ -1,10 +1,10 @@
-use std::cmp::max;
+use std::env;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 
-use anyhow::{Error, format_err, Result};
+use anyhow::{format_err, Error, Result};
 use crossterm::style::Stylize;
 use gzp::deflate::Gzip;
 use gzp::par::compress::{ParCompress, ParCompressBuilder};
@@ -15,7 +15,7 @@ use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 
 use crate::address::AddressValid;
-use crate::logger::{Attempt, Logger};
+use crate::logger::{Attempt, Logger, Timer};
 use crate::passphrase::Passphrase;
 use crate::seed::{Finished, Seed};
 
@@ -28,7 +28,65 @@ const CHANNEL_SIZE: usize = 100;
 const SEED_TASKS: usize = 1000;
 const STDIN_PASSPHRASE_MEM: usize = 10_000_000;
 const STDIN_BUFFER_BYTES: usize = 1000;
-const S_MODE_MAXIMUM: u64 = 10_000_000;
+const S_MODE_MAXIMUM: u64 = 100_000_000;
+
+#[derive(Debug, Clone)]
+pub struct HashcatExe {
+    exe: PathBuf,
+}
+
+impl HashcatExe {
+    pub fn new(exe: PathBuf) -> Self {
+        Self { exe }
+    }
+
+    fn cd_seedcat(&self) {
+        let parent = self.exe.parent().expect("parent folder exists");
+        let parent = parent.parent().expect("parent folder exists");
+        env::set_current_dir(&parent).expect("can set dir");
+    }
+
+    fn cd_hashcat(&self) {
+        let parent = self.exe.parent().expect("parent folder exists");
+        env::set_current_dir(&parent).expect("can set dir");
+    }
+
+    fn command(&self) -> Command {
+        Command::new(self.exe.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct HashcatMode {
+    pub runner: HashcatRunner,
+    pub passphrases: u64,
+    pub hashes: u64,
+}
+
+impl HashcatMode {
+    fn new(runner: HashcatRunner, passphrases: u64, hashes: u64) -> Self {
+        Self {
+            runner,
+            passphrases,
+            hashes,
+        }
+    }
+
+    fn is_pure_gpu(&self) -> bool {
+        match self.runner {
+            HashcatRunner::StdinMaxHashes | HashcatRunner::StdinMinPassphrases => false,
+            _ => true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum HashcatRunner {
+    PureGpu,
+    BinaryCharsets(Seed, Passphrase),
+    StdinMaxHashes,
+    StdinMinPassphrases,
+}
 
 /// Helper for running hashcat
 pub struct Hashcat {
@@ -37,17 +95,26 @@ pub struct Hashcat {
     passphrase: Option<Passphrase>,
     pub max_hashes: u64,
     pub min_passphrases: u64,
-    exe: PathBuf,
+    exe: HashcatExe,
     prefix: String,
+    hashcat_args: Vec<String>,
+    total: u64,
 }
 
 impl Hashcat {
     pub fn new(
-        exe: PathBuf,
+        exe: HashcatExe,
         address: AddressValid,
         seed: Seed,
         passphrase: Option<Passphrase>,
+        hashcat_args: Vec<String>,
     ) -> Self {
+        let mut total = seed.total();
+        total = total.saturating_mul(address.derivations.total());
+        if let Some(passphrase) = &passphrase {
+            total = total.saturating_mul(passphrase.total());
+        }
+
         Self {
             exe,
             address,
@@ -56,53 +123,54 @@ impl Hashcat {
             max_hashes: DEFAULT_MAX_HASHES,
             prefix: "hc".to_string(),
             min_passphrases: DEFAULT_MIN_PASSPHRASES,
+            hashcat_args,
+            total,
         }
     }
 
     pub fn total(&self) -> u64 {
-        let mut total = self.seed.total();
-        total = total.saturating_mul(self.address.derivations.total());
-        if let Some(passphrase) = &self.passphrase {
-            total = total.saturating_mul(passphrase.total());
-        }
-        total
+        self.total
     }
 
     pub fn set_prefix(&mut self, prefix: String) {
         self.prefix = prefix;
     }
 
-    pub fn pure_gpu(&self) -> Result<bool> {
-        Ok(self.uses_binary_charsets()?
-            || (self.within_max_hashes() && self.has_enough_passphrases()))
-    }
-
-    /// If we have less than 10K passphrases GPU mode is much slower than Stdin
-    pub fn has_enough_passphrases(&self) -> bool {
-        self.total_passphrases() > self.min_passphrases
-    }
-
-    /// If we have more than 10M seeds GPU mode has too many hashes to load
-    pub fn within_max_hashes(&self) -> bool {
-        self.seed.valid_seeds() * self.address.derivations.total() < self.max_hashes
-    }
-
-    pub fn uses_binary_charsets(&self) -> Result<bool> {
-        Ok(self
-            .seed
-            .binary_charsets(self.max_hashes, &self.passphrase)?
-            .is_some())
-    }
-
-    pub fn total_passphrases(&self) -> u64 {
-        match &self.passphrase {
+    pub fn get_mode(&self) -> Result<HashcatMode> {
+        let total_derivations = self.address.derivations.args().len() as u64;
+        let binary_charsets = self.seed.binary_charsets(self.max_hashes, &self.passphrase);
+        if let Some((seed, passphrase)) = binary_charsets? {
+            if passphrase.total() > self.min_passphrases {
+                return Ok(HashcatMode::new(
+                    HashcatRunner::BinaryCharsets(seed.clone(), passphrase.clone()),
+                    passphrase.total(),
+                    seed.total_args() * total_derivations,
+                ));
+            }
+        }
+        let derivations = self.address.derivations.args().len() as u64;
+        let passphrases = match &self.passphrase {
             None => 0,
             Some(passphrase) => passphrase.total(),
+        };
+
+        let gpu_hashes = self.seed.valid_seeds() * derivations;
+        let stdin_hashes = self.seed.total_args() * derivations;
+        if gpu_hashes > self.max_hashes {
+            let mode = HashcatMode::new(HashcatRunner::StdinMaxHashes, 0, stdin_hashes);
+            return Ok(mode);
         }
+        if passphrases < self.min_passphrases {
+            let mode = HashcatMode::new(HashcatRunner::StdinMinPassphrases, 0, stdin_hashes);
+            return Ok(mode);
+        }
+        let mode = HashcatMode::new(HashcatRunner::PureGpu, passphrases, gpu_hashes);
+        Ok(mode)
     }
 
-    pub async fn run(&mut self, args: &Vec<String>, log: &Logger) -> Result<Finished> {
-        let mut args = args.clone();
+    pub async fn run(&mut self, log: &Logger) -> Result<(Timer, Finished)> {
+        self.exe.cd_hashcat();
+        let mut args = self.hashcat_args.clone();
         args.push(self.hashfile());
 
         let mut passphrase_args = vec![];
@@ -110,47 +178,45 @@ impl Hashcat {
             passphrase_args = passphrase.build_args(&self.prefix, log).await?;
         }
 
-        let is_pure_gpu = self.pure_gpu()?;
+        let mode = self.get_mode()?;
+        let is_pure_gpu = mode.is_pure_gpu();
 
-        if !is_pure_gpu {
-            // Stdin mode
-            self.seed = self.seed.with_pure_gpu(is_pure_gpu);
-            let seed_rx = self.spawn_seed_senders().await;
-            let rx = Self::spawn_arg_sender(&self.seed).await;
-            self.write_hashes(log, rx, self.seed.total_args()).await?;
+        match mode.clone().runner {
+            HashcatRunner::PureGpu => {
+                for arg in &passphrase_args {
+                    args.push(arg.clone());
+                }
+                self.seed = self.seed.with_pure_gpu(is_pure_gpu);
+                let seed_rx = self.spawn_seed_senders().await;
+                self.write_hashes(log, seed_rx, mode.hashes).await?;
 
-            let child = self.spawn_hashcat(&args, is_pure_gpu);
-            let stdin = HashcatStdin::new(child.stdin, passphrase_args, &self.exe);
-            spawn(Self::stdin_sender(self.prefix.clone(), stdin, seed_rx));
-
-            self.run_helper(child.stderr, child.stdout, log).await
-        } else if let Some((seed, passphrase)) = self
-            .seed
-            .binary_charsets(self.max_hashes, &self.passphrase)?
-        {
-            // GPU mode with binary charsets
-            for arg in &passphrase.build_args(&self.prefix, log).await? {
-                args.push(arg.clone());
+                let child = self.spawn_hashcat(&args, mode);
+                self.run_helper(child.stderr, child.stdout, log).await
             }
-            self.passphrase = Some(passphrase);
-            self.seed = seed.with_pure_gpu(is_pure_gpu);
-            let rx = Self::spawn_arg_sender(&self.seed).await;
-            self.write_hashes(log, rx, self.seed.total_args()).await?;
+            HashcatRunner::BinaryCharsets(seed, passphrase) => {
+                for arg in &passphrase.build_args(&self.prefix, log).await? {
+                    args.push(arg.clone());
+                }
+                self.passphrase = Some(passphrase);
+                self.seed = seed.with_pure_gpu(is_pure_gpu);
+                let rx = Self::spawn_arg_sender(&self.seed).await;
+                self.write_hashes(log, rx, mode.hashes).await?;
 
-            let child = self.spawn_hashcat(&args, is_pure_gpu);
-            self.run_helper(child.stderr, child.stdout, log).await
-        } else {
-            // GPU mode
-            for arg in &passphrase_args {
-                args.push(arg.clone());
+                let child = self.spawn_hashcat(&args, mode);
+                self.run_helper(child.stderr, child.stdout, log).await
             }
-            self.seed = self.seed.with_pure_gpu(is_pure_gpu);
-            let seed_rx = self.spawn_seed_senders().await;
-            let valid_seeds = self.seed.valid_seeds();
-            self.write_hashes(log, seed_rx, valid_seeds).await?;
+            HashcatRunner::StdinMaxHashes | HashcatRunner::StdinMinPassphrases => {
+                self.seed = self.seed.with_pure_gpu(is_pure_gpu);
+                let seed_rx = self.spawn_seed_senders().await;
+                let rx = Self::spawn_arg_sender(&self.seed).await;
+                self.write_hashes(log, rx, mode.hashes).await?;
 
-            let child = self.spawn_hashcat(&args, is_pure_gpu);
-            self.run_helper(child.stderr, child.stdout, log).await
+                let child = self.spawn_hashcat(&args, mode);
+                let stdin = HashcatStdin::new(child.stdin, passphrase_args, &self.exe);
+                spawn(Self::stdin_sender(self.prefix.clone(), stdin, seed_rx));
+
+                self.run_helper(child.stderr, child.stdout, log).await
+            }
         }
     }
 
@@ -159,11 +225,18 @@ impl Hashcat {
         stderr: Option<ChildStderr>,
         stdout: Option<ChildStdout>,
         log: &Logger,
-    ) -> Result<Finished> {
+    ) -> Result<(Timer, Finished)> {
+        // multiplier is how many derivations and seeds are performed per hash
+        let mut multiplier = self.seed.hash_ratio();
+        multiplier *= self.address.derivations.hash_ratio();
         spawn(Self::run_stderr(stderr, self.file(HC_ERROR_FILE)?));
-        let result = self.run_stdout(stdout, log).await?;
+        let timer = log
+            .time_verbose("Recovery Guesses", self.total(), multiplier as u64)
+            .await;
+        let result = self.run_stdout(stdout, log, &timer).await?;
         let found = self.seed.found(result)?;
-        Ok(found)
+        self.exe.cd_seedcat();
+        Ok((timer, found))
     }
 
     fn hashfile(&self) -> String {
@@ -187,28 +260,29 @@ impl Hashcat {
         let mut parz: ParCompress<Gzip> = ParCompressBuilder::new().from_writer(writer);
         let kind = address.kind.key.as_bytes();
         let separator = ":".as_bytes();
-        let derivation = address.derivations.arg.as_bytes();
         let address = address.formatted.as_bytes();
         let newline = "\n".as_bytes();
 
         while let Some(seed) = receiver.recv().await {
-            parz.write_all(kind).map_err(Error::msg)?;
-            parz.write_all(separator).map_err(Error::msg)?;
-            parz.write_all(derivation).map_err(Error::msg)?;
-            parz.write_all(separator).map_err(Error::msg)?;
-            parz.write_all(&seed).map_err(Error::msg)?;
-            parz.write_all(separator).map_err(Error::msg)?;
-            parz.write_all(address).map_err(Error::msg)?;
-            parz.write_all(newline).map_err(Error::msg)?;
-            timer.add(1);
+            for derivation in self.address.derivations.args() {
+                parz.write_all(kind).map_err(Error::msg)?;
+                parz.write_all(separator).map_err(Error::msg)?;
+                parz.write_all(derivation.as_bytes()).map_err(Error::msg)?;
+                parz.write_all(separator).map_err(Error::msg)?;
+                parz.write_all(&seed).map_err(Error::msg)?;
+                parz.write_all(separator).map_err(Error::msg)?;
+                parz.write_all(address).map_err(Error::msg)?;
+                parz.write_all(newline).map_err(Error::msg)?;
+                timer.add(1);
+            }
         }
         parz.finish().map_err(Error::msg)?;
         timer.end();
         timer_handle.await.map_err(Error::msg)
     }
 
-    fn spawn_hashcat(&self, args: &Vec<String>, is_pure_gpu: bool) -> Child {
-        let mut cmd = Command::new(self.exe.as_os_str());
+    fn spawn_hashcat(&self, args: &Vec<String>, mode: HashcatMode) -> Child {
+        let mut cmd = self.exe.command();
         cmd.arg("-m");
         cmd.arg("28510");
         cmd.arg("-w");
@@ -218,15 +292,8 @@ impl Hashcat {
         cmd.arg("--status-timer");
         cmd.arg("1");
 
-        // FIXME: Required because the derivation loop2 makes status updates very slow
-        if self.address.derivations.total() > 10 {
-            cmd.arg("--force");
-            cmd.arg("-n");
-            cmd.arg("1");
-        }
-
         // -S mode is faster if we have <10M passphrases
-        if is_pure_gpu && self.total_passphrases() < S_MODE_MAXIMUM {
+        if mode.is_pure_gpu() && mode.passphrases < S_MODE_MAXIMUM {
             let attack_mode = self
                 .passphrase
                 .clone()
@@ -288,7 +355,7 @@ impl Hashcat {
         // spawn hashcat to stdout to generate passphrases
         let exe = stdin.exe.clone();
         let passphrase_args = stdin.passphrase_args.clone();
-        let mut cmd = Command::new(exe.as_os_str());
+        let mut cmd = exe.command();
         cmd.arg("--stdout");
         cmd.arg("--session");
         cmd.arg(format!("{}stdout", prefix));
@@ -367,12 +434,12 @@ impl Hashcat {
         }
     }
 
-    async fn run_stdout(&self, out: Option<ChildStdout>, log: &Logger) -> Result<Option<String>> {
-        let mut seed_ratio = self.seed.total() / max(1, self.seed.valid_seeds());
-        seed_ratio *= self.address.derivations.total();
-        let timer = log
-            .time_verbose("Recovery Guesses", self.total(), seed_ratio)
-            .await;
+    async fn run_stdout(
+        &self,
+        out: Option<ChildStdout>,
+        log: &Logger,
+        timer: &Timer,
+    ) -> Result<Option<String>> {
         let mut handle = None;
 
         let address = self.address.formatted.clone();
@@ -405,6 +472,10 @@ impl Hashcat {
             writeln!(file, "{}", line).map_err(Error::from)?;
             file.flush().map_err(Error::from)?;
         }
+        timer.end();
+        if let Some(handle) = handle {
+            handle.await.expect("Logging finishes");
+        }
         Ok(None)
     }
 
@@ -424,11 +495,11 @@ struct HashcatStdin {
     stdin: ChildStdin,
     stdin_buffer: Vec<u8>,
     passphrase_args: Vec<String>,
-    exe: PathBuf,
+    exe: HashcatExe,
 }
 
 impl HashcatStdin {
-    pub fn new(stdin: Option<ChildStdin>, passphrase_args: Vec<String>, exe: &PathBuf) -> Self {
+    pub fn new(stdin: Option<ChildStdin>, passphrase_args: Vec<String>, exe: &HashcatExe) -> Self {
         Self {
             stdin: stdin.expect("Stdin piped"),
             stdin_buffer: vec![],
@@ -448,10 +519,9 @@ impl HashcatStdin {
     }
 
     pub fn flush(&mut self) {
-        self.stdin
-            .write_all(&self.stdin_buffer)
-            .expect("Stdin closed");
-        self.stdin.flush().expect("Stdin closed");
+        // might close early due to success
+        let _ = self.stdin.write_all(&self.stdin_buffer);
+        let _ = self.stdin.flush();
     }
 }
 
@@ -459,28 +529,58 @@ impl HashcatStdin {
 mod tests {
     use crate::hashcat::*;
 
-    #[test]
-    fn creates_total() {
-        let passphrase = Passphrase::from_arg(&vec!["?l".to_string()], &vec![]).unwrap();
-        let seed = Seed::from_args("?", &None).unwrap();
-        let address = AddressValid::from_arg(Some("1B2hrNm7JGW6Wenf8oMvjWB3DPT9H9vAJ9".to_string()), &None).unwrap();
-        let hc = Hashcat::new(PathBuf::new(), address, seed, Some(passphrase));
-
-        assert_eq!(hc.total(), 2 * 2048 * 26);
+    fn hashcat(passphrase: &str, seed: &str) -> Hashcat {
+        let passphrase = Passphrase::from_arg(&vec![passphrase.to_string()], &vec![]).unwrap();
+        let seed = Seed::from_args(seed, &None).unwrap();
+        let derivation = Some("m/0/0".to_string());
+        let address =
+            AddressValid::from_arg("1B2hrNm7JGW6Wenf8oMvjWB3DPT9H9vAJ9", &derivation).unwrap();
+        Hashcat::new(
+            HashcatExe::new(PathBuf::new()),
+            address,
+            seed.clone(),
+            Some(passphrase.clone()),
+            vec![],
+        )
     }
 
     #[test]
     fn determines_whether_to_run_pure_gpu() {
-        let passphrase = Passphrase::from_arg(&vec!["?l".to_string()], &vec![]).unwrap();
-        let seed = Seed::from_args("zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,?,?", &None).unwrap();
-        let address = AddressValid::from_arg(Some("1B2hrNm7JGW6Wenf8oMvjWB3DPT9H9vAJ9".to_string()), &None).unwrap();
-        let mut hc = Hashcat::new(PathBuf::new(), address, seed, Some(passphrase));
+        let hc = hashcat("", "zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,?,?");
+        let mode = hc.get_mode().unwrap();
+        assert!(matches!(mode.runner, HashcatRunner::BinaryCharsets(_, _)));
+        assert_eq!(mode.hashes, 1);
+        assert_eq!(mode.passphrases, 2048 * 2_u64.pow(7));
 
-        // 524288 = 2 derivations * 2048^2 seeds / 16 checksums
-        hc.max_hashes = 524288;
-        assert_eq!(hc.within_max_hashes(), false);
+        let hc = hashcat("", "zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,z?,?");
+        let mode = hc.get_mode().unwrap();
+        assert!(matches!(mode.runner, HashcatRunner::StdinMinPassphrases));
+        assert_eq!(mode.hashes, 1);
+        assert_eq!(mode.passphrases, 0);
 
-        hc.max_hashes = 524289;
-        assert_eq!(hc.within_max_hashes(), true);
+        let hc = hashcat("?d?d?d?d", "zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,z?,?");
+        let mode = hc.get_mode().unwrap();
+        assert!(matches!(mode.runner, HashcatRunner::BinaryCharsets(_, _)));
+        assert_eq!(mode.hashes, 4); // number of z words
+        assert_eq!(mode.passphrases, 10_000 * 2_u64.pow(7));
+
+        let hc = hashcat("?d?d?d?d", "?,?,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo");
+        let mode = hc.get_mode().unwrap();
+        assert!(matches!(mode.runner, HashcatRunner::PureGpu));
+        assert_eq!(mode.hashes, (2048 * 2048) / 16); // valid seeds estimate
+        assert_eq!(mode.passphrases, 10_000);
+
+        let hc = hashcat("?d?d", "?,?,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo");
+        let mode = hc.get_mode().unwrap();
+        assert!(matches!(mode.runner, HashcatRunner::StdinMinPassphrases));
+        assert_eq!(mode.hashes, 1);
+        assert_eq!(mode.passphrases, 0);
+
+        let hc = hashcat("?d?d?d?d", "?,?,?,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo");
+        let mode = hc.get_mode().unwrap();
+        assert!(matches!(mode.runner, HashcatRunner::StdinMaxHashes));
+        assert_eq!(mode.hashes, 1);
+        assert_eq!(mode.passphrases, 0);
+        assert_eq!(hc.total(), 10_000 * 2048 * 2048 * 2048);
     }
 }

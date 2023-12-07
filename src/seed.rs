@@ -1,3 +1,4 @@
+use std::cmp::max;
 use std::collections::BTreeSet;
 use std::fmt::{Display, Formatter};
 use std::string::ToString;
@@ -17,15 +18,15 @@ const EXACT_VALID_MAX: u64 = 100_000;
 const VALID_LENGTHS: [usize; 5] = [12, 15, 18, 21, 24];
 
 const ERR_MSG: &str = "\nSeed takes 1 arg with comma or space-separated values:
-  Unknown word:    '?' expands into all possible 2048 words
-  Unknown suffix:  'zo?' expands into 'zone|zoo'
-  Unknown prefix:  '?ppy' expands into 'happy|puppy|unhappy'
-  Unknown both:    '?orro?' expands into 'borrow|horror|tomorrow'
-  Multiple words:  'puppy|zo?' expands into 'puppy|zone|zoo'
-  Anchor word:     '^able' when using --combinations this word stays in place
-                    (wildcards may also be used in anchored words e.g. '^s?')
+ Unknown word:    '?' expands into all possible 2048 words
+ Unknown suffix:  'zo?' expands into 'zone|zoo'
+ Unknown prefix:  '?ppy' expands into 'happy|puppy|unhappy'
+ Unknown both:    '?orro?' expands into 'borrow|horror|tomorrow'
+ Multiple words:  'puppy|zo?' expands into 'puppy|zone|zoo'
+ Anchor word:     '^able' when using --combinations this word stays in place
+                   (wildcards may also be used in anchored words e.g. '^s?')
 
-  Putting together 12 words: '?,wa?,?kin,?kul?,pass|arr?|zoo,vague,^?ug,^flight,^wolf,^demise,?,?'";
+ Putting together 12 words: '?,wa?,?kin,?kul?,pass|arr?|zoo,vague,^?ug,^flight,^wolf,^demise,?,?'";
 
 #[derive(Debug, Clone)]
 pub struct Seed {
@@ -49,10 +50,12 @@ impl Attempt for Seed {
 }
 
 impl Seed {
+    #[allow(dead_code)]
     fn from_arg(arg: &str) -> Result<Self> {
         Self::from_args(arg, &None)
     }
 
+    #[allow(dead_code)]
     fn from_combo(arg: &str, combo_arg: usize) -> Result<Self> {
         Self::from_args(arg, &Some(combo_arg))
     }
@@ -114,12 +117,18 @@ impl Seed {
         Ok(Self::from_words(words))
     }
 
+    pub fn hash_ratio(&self) -> f64 {
+        let valid = max(1, self.valid_seeds()) as f64;
+        self.total() as f64 / valid
+    }
+
     pub fn with_pure_gpu(&self, is_pure_gpu: bool) -> Self {
         let mut copy = self.clone();
         copy.encoder.is_pure_gpu = is_pure_gpu;
         copy
     }
 
+    #[allow(dead_code)]
     fn from_vecs(words: Vec<Vec<u32>>) -> Seed {
         Self::from_words(Combinations::new(words))
     }
@@ -567,7 +576,9 @@ mod tests {
         assert_eq!(s.words.estimate_total(1_000_000), 479001600);
 
         let s = Seed::from_arg("zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,?,?").unwrap();
-        assert_eq!(s.valid_seeds(), 262144);
+        assert_eq!(s.total(), 2048 * 2048);
+        assert_eq!(s.valid_seeds(), 2048 * 2048 / 16);
+        assert_eq!(s.hash_ratio(), 16.0);
 
         let s = Seed::from_arg("zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo,zoo|zone,?,?").unwrap();
         assert_eq!(s.valid_seeds(), 524288);
@@ -772,7 +783,7 @@ mod tests {
     }
 }
 
-const BIP39_WORDS: &'static [&str; 2048] = &[
+pub const BIP39_WORDS: &'static [&str; 2048] = &[
     "abandon", "ability", "able", "about", "above", "absent", "absorb", "abstract", "absurd",
     "abuse", "access", "accident", "account", "accuse", "achieve", "acid", "acoustic", "acquire",
     "across", "act", "action", "actor", "actress", "actual", "adapt", "add", "addict", "address",
