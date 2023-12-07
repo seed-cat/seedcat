@@ -16,7 +16,8 @@
 # curl https://sh.rustup.rs -sSf | sh
 # rustup target add x86_64-pc-windows-gnu
 
-HC="hashcat"
+SC="seedcat"
+HC="$SC/hashcat"
 
 set -e
 source ./scripts/configure_hashcat.sh
@@ -24,12 +25,16 @@ source ./scripts/configure_hashcat.sh
 make clean
 make binaries
 cd ..
-
 cargo build --release --target x86_64-pc-windows-gnu
 cargo build --release --target x86_64-unknown-linux-gnu
 
+cd ..
 rm -f "$PROJECT_NAME.zip"
-zip -r "$PROJECT_NAME.zip" . -i dicts/* $HC/hashcat.exe -i $HC/hashcat.bin -i $HC/hashcat.hcstat2 $HC/modules/*.so \
-  $HC/modules/*.dll $HC/OpenCL/*.cl $HC/OpenCL/*.h $HC/charsets/* $HC/charsets/*/*
-zip -ju "$PROJECT_NAME.zip" "./target/x86_64-pc-windows-gnu/release/$PROJECT_NAME.exe"
-zip -ju "$PROJECT_NAME.zip" "./target/x86_64-unknown-linux-gnu/release/$PROJECT_NAME"
+cp "./$SC/target/x86_64-pc-windows-gnu/release/seedcat.exe" $SC
+cp "./$SC/target/x86_64-unknown-linux-gnu/release/seedcat" $SC
+
+zip -r "$PROJECT_NAME.zip" . -i $SC/benchmarks.txt  $SC/scripts/* $SC/dicts/* $HC/hashcat.exe $HC/hashcat.bin $HC/hashcat.hcstat2 \
+$HC/modules/*.so $HC/modules/*.dll $HC/OpenCL/*.cl $HC/OpenCL/*.h $HC/charsets/* $HC/charsets/*/*
+
+zip -r "$PROJECT_NAME.zip" -m $SC/seedcat.exe $SC/seedcat
+mv "$PROJECT_NAME.zip" $SC

@@ -2,7 +2,10 @@
 # We disable unused modules for faster and smaller compilation target
 
 set -e
-export PROJECT_NAME="seedcat"
+CARGO_NAME=$(cargo run -- -V)
+export PROJECT_NAME="${CARGO_NAME// /_}"
+echo "Running command for $PROJECT_NAME"
+
 cd hashcat
 cd src
 MODULES_DISABLE=""

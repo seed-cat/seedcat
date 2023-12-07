@@ -1,4 +1,4 @@
-# Uploads the release to a cloud instance with a script to execute
+# Uploads the release to a cloud instance and unzips
 # Requires ssh support by the server (tested on vast.ai)
 
 set -e

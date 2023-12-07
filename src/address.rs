@@ -54,12 +54,17 @@ const ERR_MSG: &str = "\nDerivation path should be valid comma or path-separated
   You can try multiple paths:         'm/0/0,m/44h/0h/0h/0/0'
   '?' attempts all paths from 0-11:   'm/0/?11'
 
-  Master XPUB does not require a derivation path and is ~40% faster to guess
+  Master XPUB does not require a derivation path and is ~2x faster to guess
   Try to use the exact derivation path for the address you have (see https://walletsrecovery.org/)\n";
 
 impl AddressValid {
     pub fn from_arg(address: &str, derivation: &Option<String>) -> Result<Self> {
         let kind = Self::kind(&address)?;
+
+        if kind.is_xpub && derivation.is_some() {
+            bail!("XPUBs do not require a derivation path to be specified");
+        }
+
         let derivations = Self::derivation(&kind, derivation)?;
 
         Ok(Self::new(address.to_string(), kind, derivations))
@@ -106,6 +111,8 @@ impl AddressValid {
             Some(arg) => {
                 let args = if arg.contains(",") {
                     arg.split(",")
+                } else if arg.contains("|") {
+                    arg.split("|")
                 } else {
                     arg.split(" ")
                 };
@@ -306,7 +313,7 @@ mod tests {
 
         // splits if over 10
         let derivation =
-            AddressValid::derivation(&kind, &Some("m/?9'/9/?9,m/0/0".to_string())).unwrap();
+            AddressValid::derivation(&kind, &Some("m/?9'/9/?9|m/0/0".to_string())).unwrap();
         assert_eq!(derivation.begin(), "m/0'/9/0");
         assert_eq!(derivation.end(), "m/0/0");
         assert_eq!(derivation.total(), 101);

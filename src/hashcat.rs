@@ -30,6 +30,7 @@ const STDIN_PASSPHRASE_MEM: usize = 10_000_000;
 const STDIN_BUFFER_BYTES: usize = 1000;
 const S_MODE_MAXIMUM: u64 = 100_000_000;
 
+/// Wrapper for the location of the exe
 #[derive(Debug, Clone)]
 pub struct HashcatExe {
     exe: PathBuf,
@@ -40,26 +41,33 @@ impl HashcatExe {
         Self { exe }
     }
 
+    /// Move to seedcat folder for finding dicts
     fn cd_seedcat(&self) {
         let parent = self.exe.parent().expect("parent folder exists");
         let parent = parent.parent().expect("parent folder exists");
         env::set_current_dir(&parent).expect("can set dir");
     }
 
+    /// Move to hashcat folder for running
     fn cd_hashcat(&self) {
         let parent = self.exe.parent().expect("parent folder exists");
         env::set_current_dir(&parent).expect("can set dir");
     }
 
+    /// Create command from the exe path
     fn command(&self) -> Command {
         Command::new(self.exe.clone())
     }
 }
 
+/// Information about the hashcat mode
 #[derive(Debug, Clone)]
 pub struct HashcatMode {
+    /// The kind of run we are doing
     pub runner: HashcatRunner,
+    /// The number of passphrases we will try
     pub passphrases: u64,
+    /// The number of hashes we write to the hashfile
     pub hashes: u64,
 }
 
@@ -72,6 +80,7 @@ impl HashcatMode {
         }
     }
 
+    /// True if we are running in pure GPU mode (instead of stdin)
     fn is_pure_gpu(&self) -> bool {
         match self.runner {
             HashcatRunner::StdinMaxHashes | HashcatRunner::StdinMinPassphrases => false,
@@ -80,11 +89,16 @@ impl HashcatMode {
     }
 }
 
+/// Represents how hashcat will be run
 #[derive(Debug, Clone)]
 pub enum HashcatRunner {
+    /// Everything is run by hashcat itself
     PureGpu,
+    /// Everything is run by hashcat itself using binary charsets in (Seed, Passphrase)
     BinaryCharsets(Seed, Passphrase),
+    /// Running in stdin mode due to too many hashes
     StdinMaxHashes,
+    /// Running in stdin mode due to too few passphrases
     StdinMinPassphrases,
 }
 
@@ -128,14 +142,17 @@ impl Hashcat {
         }
     }
 
+    /// Total guesses we will make
     pub fn total(&self) -> u64 {
         self.total
     }
 
+    /// How all files will be prefixed (used for tests)
     pub fn set_prefix(&mut self, prefix: String) {
         self.prefix = prefix;
     }
 
+    /// Get the mode we will run in
     pub fn get_mode(&self) -> Result<HashcatMode> {
         let total_derivations = self.address.derivations.args().len() as u64;
         let binary_charsets = self.seed.binary_charsets(self.max_hashes, &self.passphrase);
@@ -168,7 +185,8 @@ impl Hashcat {
         Ok(mode)
     }
 
-    pub async fn run(&mut self, log: &Logger) -> Result<(Timer, Finished)> {
+    /// Runs the hashcat program
+    pub async fn run(&mut self, log: &Logger, is_bench: bool) -> Result<(Timer, Finished)> {
         self.exe.cd_hashcat();
         let mut args = self.hashcat_args.clone();
         args.push(self.hashfile());
@@ -182,6 +200,7 @@ impl Hashcat {
         let is_pure_gpu = mode.is_pure_gpu();
 
         match mode.clone().runner {
+            // All args get passed to hashcat, hashfile filled with valid seeds
             HashcatRunner::PureGpu => {
                 for arg in &passphrase_args {
                     args.push(arg.clone());
@@ -191,8 +210,10 @@ impl Hashcat {
                 self.write_hashes(log, seed_rx, mode.hashes).await?;
 
                 let child = self.spawn_hashcat(&args, mode);
-                self.run_helper(child.stderr, child.stdout, log).await
+                self.run_helper(child.stderr, child.stdout, log, is_bench)
+                    .await
             }
+            // All args get passed to hashcat, hashfile filled with args
             HashcatRunner::BinaryCharsets(seed, passphrase) => {
                 for arg in &passphrase.build_args(&self.prefix, log).await? {
                     args.push(arg.clone());
@@ -203,8 +224,10 @@ impl Hashcat {
                 self.write_hashes(log, rx, mode.hashes).await?;
 
                 let child = self.spawn_hashcat(&args, mode);
-                self.run_helper(child.stderr, child.stdout, log).await
+                self.run_helper(child.stderr, child.stdout, log, is_bench)
+                    .await
             }
+            // Valid seeds and passphrases passed via stdin
             HashcatRunner::StdinMaxHashes | HashcatRunner::StdinMinPassphrases => {
                 self.seed = self.seed.with_pure_gpu(is_pure_gpu);
                 let seed_rx = self.spawn_seed_senders().await;
@@ -215,7 +238,8 @@ impl Hashcat {
                 let stdin = HashcatStdin::new(child.stdin, passphrase_args, &self.exe);
                 spawn(Self::stdin_sender(self.prefix.clone(), stdin, seed_rx));
 
-                self.run_helper(child.stderr, child.stdout, log).await
+                self.run_helper(child.stderr, child.stdout, log, is_bench)
+                    .await
             }
         }
     }
@@ -225,6 +249,7 @@ impl Hashcat {
         stderr: Option<ChildStderr>,
         stdout: Option<ChildStdout>,
         log: &Logger,
+        is_bench: bool,
     ) -> Result<(Timer, Finished)> {
         // multiplier is how many derivations and seeds are performed per hash
         let mut multiplier = self.seed.hash_ratio();
@@ -233,7 +258,7 @@ impl Hashcat {
         let timer = log
             .time_verbose("Recovery Guesses", self.total(), multiplier as u64)
             .await;
-        let result = self.run_stdout(stdout, log, &timer).await?;
+        let result = self.run_stdout(stdout, log, &timer, is_bench).await?;
         let found = self.seed.found(result)?;
         self.exe.cd_seedcat();
         Ok((timer, found))
@@ -439,6 +464,7 @@ impl Hashcat {
         out: Option<ChildStdout>,
         log: &Logger,
         timer: &Timer,
+        is_bench: bool,
     ) -> Result<Option<String>> {
         let mut handle = None;
 
@@ -468,6 +494,8 @@ impl Hashcat {
                     handle.await.expect("Logging finishes");
                 }
                 return Ok(line.split(":").nth(1).map(ToString::to_string));
+            } else if is_bench && timer.seconds() >= 60 {
+                break;
             }
             writeln!(file, "{}", line).map_err(Error::from)?;
             file.flush().map_err(Error::from)?;

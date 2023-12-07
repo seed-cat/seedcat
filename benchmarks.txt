@@ -1,0 +1,16 @@
+Benchmark Name                 |Guesses    |Speed      |GPU Speed  |Time               |Wall Time
+Master XPUB (mask attack)      |38.6M      |633K/sec   |633K/sec   |1 mins, 1 secs     |1 mins, 8 secs
+1000 derivations (mask attack) |35.1M      |575K/sec   |57.5K/sec  |1 mins, 1 secs     |1 mins, 8 secs
+10 derivations (mask attack)   |40.3M      |630K/sec   |63.0K/sec  |1 mins, 4 secs     |1 mins, 16 secs
+1 derivations (mask attack)    |22.7M      |372K/sec   |372K/sec   |1 mins, 1 secs     |1 mins, 8 secs
+Missing first words of 12      |279M       |4.58M/sec  |286K/sec   |1 mins, 1 secs     |1 mins, 9 secs
+Missing first words of 24      |3.44B      |54.6M/sec  |213K/sec   |1 mins, 3 secs     |1 mins, 9 secs
+Permute 12 of 12 words         |236M       |3.75M/sec  |235K/sec   |1 mins, 3 secs     |1 mins, 10 secs
+Permute 12 of 24 words         |1.55B      |23.8M/sec  |93.0K/sec  |1 mins, 5 secs     |1 mins, 11 secs
+Missing last words of 12       |365M       |5.99M/sec  |374K/sec   |1 mins, 1 secs     |1 mins, 8 secs
+Missing last words of 24       |5.50B      |90.2M/sec  |352K/sec   |1 mins, 1 secs     |1 mins, 8 secs
+Passphrase dict+dict attack    |14.6M      |239K/sec   |239K/sec   |1 mins, 1 secs     |1 mins, 8 secs
+Passphrase dict+mask attack    |16.0M      |262K/sec   |262K/sec   |1 mins, 1 secs     |1 mins, 9 secs
+Passphrase mask+dict attack    |4.16M      |68.1K/sec  |68.1K/sec  |1 mins, 1 secs     |1 mins, 8 secs
+Small passphrase + seed        |333M       |5.46M/sec  |341K/sec   |1 mins, 1 secs     |1 mins, 8 secs
+Large passphrase + seed        |371M       |5.98M/sec  |374K/sec   |1 mins, 2 secs     |1 mins, 8 secs

@@ -36,7 +36,7 @@ impl Test {
         let id = TEST_COUNT.fetch_add(1, Ordering::Relaxed);
         let name = format!("hc_test{}", id);
 
-        let log = Logger::off();
+        let log = Logger::new();
         let mut hashcat = Self::configure(&name, &self.args, &log);
         if self.expected.pure_gpu {
             hashcat.min_passphrases = 0;
@@ -45,13 +45,15 @@ impl Test {
         }
 
         if self.binary {
-            assert!(matches!(
+            if !matches!(
                 hashcat.get_mode().unwrap().runner,
                 HashcatRunner::BinaryCharsets(_, _)
-            ));
+            ) {
+                bail!("Expected binary mode for test '{}'", name);
+            }
         }
 
-        let run = hashcat.run(&log);
+        let run = hashcat.run(&log, false);
         let (_, result) = run.await.unwrap();
         if result != self.expected {
             bail!("{} Failed: {}\nExpected: {}", name, result, self.expected);
@@ -93,7 +95,7 @@ impl Tests {
     }
 }
 
-pub async fn run_tests() {
+pub async fn run_tests() -> Result<()> {
     let mut tests = Tests::new();
 
     tests.test_binary("-a 1Mbe4MHF4awqg2cojz8LRJErKaKyoQjsiD -s harbor,?,clinic,index,mix,shoe,tube,awkward,food,acquire,sustain,?",
@@ -117,7 +119,7 @@ pub async fn run_tests() {
     tests.test_stdin("-a bc1qscpdw0smafzpwe5s9kjfstq48p6vcz0n30sccs -s p?,stumble,print,mansion,occur,client,deposit,electric,dance,olive,stay,mom -d m/0/0/?2,m/84'/0'/?2'/0/?3",
                      "private,stumble,print,mansion,occur,client,deposit,electric,dance,olive,stay,mom");
 
-    tests.test_binary("-a bc1qscpdw0smafzpwe5s9kjfstq48p6vcz0n30sccs -s private,stumble,print,mansion,occur,client,deposit,electric,dance,olive,stay,? -d m/0/0/?2,m/84'/0'/?2'/0/?3",
+    tests.test_binary("-a bc1qscpdw0smafzpwe5s9kjfstq48p6vcz0n30sccs -s private,stumble,print,mansion,occur,client,deposit,electric,dance,olive,stay,? -d m/0/0/?2|m/84'/0'/?2'/0/?3",
                      "private,stumble,print,mansion,occur,client,deposit,electric,dance,olive,stay,mom");
 
     tests.test_both("-a xpub661MyMwAqRbcF5snxLXxdet4WwyipbK6phjJdy5ViauCkTSjQc37zm6Gyyryq1aF8Uuj4Xub9Bh7LfQo8ZmNujZVczj1FVs1wMDWrnTym39 -s very,cart,matter,object,raise,predict,water,term,easy,play,?,earn -p hashca?2 -2 zt",
@@ -138,16 +140,10 @@ pub async fn run_tests() {
     let num = tests.tests.len();
     let mut passed = 0;
     for test in tests.tests.drain(..) {
-        match test.run().await {
-            Ok(_) => {
-                passed += 1;
-                let output = format!("{}/{} tests passed.", passed, num);
-                println!("{}", output.as_str().dark_green());
-                if passed == num {
-                    return;
-                }
-            }
-            Err(err) => println!("{}", err.to_string().as_str().dark_red()),
-        }
+        test.run().await?;
+        passed += 1;
+        let output = format!("{}/{} tests passed.", passed, num);
+        println!("{}", output.as_str().dark_green());
     }
+    Ok(())
 }

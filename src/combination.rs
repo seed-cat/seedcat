@@ -32,6 +32,7 @@ impl<T: Clone + Debug> Combinations<T> {
         Self::permute(elements, vec![], len)
     }
 
+    /// Generates all combinations of elements of a given length, permuting the given indices
     pub fn permute(elements: Vec<Vec<T>>, permute_indices: Vec<usize>, length: usize) -> Self {
         let permute_len = permute_indices.len() - (elements.len() - length);
         let mut permutations = Permutations::new(permute_indices.clone(), permute_len);
@@ -62,6 +63,7 @@ impl<T: Clone + Debug> Combinations<T> {
         }
     }
 
+    /// Returns Some(element) if the position is fixed, otherwise None
     pub fn fixed_positions(&self) -> Vec<Option<T>> {
         let mut fixed = vec![];
         for i in 0..self.len() {
@@ -74,6 +76,7 @@ impl<T: Clone + Debug> Combinations<T> {
         fixed
     }
 
+    /// Returns the first combination we will produce in O(1)
     pub fn begin(&self) -> Vec<T> {
         let mut vec = vec![];
         for i in 0..self.length {
@@ -82,6 +85,7 @@ impl<T: Clone + Debug> Combinations<T> {
         vec
     }
 
+    /// Returns the last combination we will produce in O(1)
     pub fn end(&self) -> Vec<T> {
         let mut vec = vec![];
         let mut permute = self.permute_indices.clone();
@@ -96,15 +100,17 @@ impl<T: Clone + Debug> Combinations<T> {
         vec
     }
 
+    /// Return a copy of all elements
     pub fn elements(&self) -> Vec<Vec<T>> {
         self.elements.clone()
     }
 
+    /// Returns the total combinations, estimating for >10M which is generally fast and accurate
     pub fn total(&self) -> u64 {
-        // Runs fast and is usually accurate for large permutations
         self.estimate_total(10_000_000)
     }
 
+    /// Returns an estimate of the total for a given sample size
     pub fn estimate_total(&self, sample_size: u64) -> u64 {
         let mut total_combo = 1_u64;
         let mut total_perm = 0_u64;
@@ -137,6 +143,7 @@ impl<T: Clone + Debug> Combinations<T> {
         total_perm.saturating_mul(total_combo)
     }
 
+    /// Returns the number of permutations (without considering combinations)
     pub fn permutations(&self) -> u64 {
         let n = self.permute_indices.len() as u64;
         let r = self.permutation.len() as u64;
@@ -147,6 +154,7 @@ impl<T: Clone + Debug> Combinations<T> {
         permutations
     }
 
+    /// Returns the length of the output
     pub fn len(&self) -> usize {
         self.length
     }
@@ -180,6 +188,7 @@ impl<T: Clone + Debug> Combinations<T> {
         }
     }
 
+    /// Returns the next combination, or None if we are finished
     pub fn next(&mut self) -> Option<&Vec<T>> {
         if self.position >= self.combinations {
             return None;
@@ -216,7 +225,7 @@ impl<T: Clone + Debug> Combinations<T> {
         Some(&self.next)
     }
 
-    // Splits seeds into a minimum number of shards
+    // Splits combinations into a minimum number of shards
     pub fn shard(&self, num: usize) -> Vec<Combinations<T>> {
         let mut shards = vec![];
 

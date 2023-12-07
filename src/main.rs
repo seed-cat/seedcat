@@ -16,7 +16,6 @@ use crate::hashcat::{Hashcat, HashcatExe, HashcatRunner};
 use crate::logger::Logger;
 use crate::passphrase::Passphrase;
 use crate::seed::{Finished, Seed};
-use crate::tests::run_tests;
 
 mod address;
 mod benchmarks;
@@ -43,26 +42,32 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum CliCommand {
-    /// Runs self-tests of the application
-    Test,
-    /// Runs benchmarks of the application
-    Bench(BenchOption),
+    /// Runs benchmarks and tests of the application
+    Test(BenchOption),
 }
 
 #[derive(Args, Debug)]
-#[group(required = true, multiple = false)]
+#[group(required = true, multiple = true)]
 pub struct BenchOption {
-    /// Runs slower for fast GPUs
-    #[arg(short = 's', long, default_value_t = false)]
-    slow: bool,
+    /// Runs all checks for a release (equivalent to -t -b -p -d)
+    #[arg(short = 'r', long, default_value_t = false)]
+    release: bool,
+
+    /// Runs integration tests
+    #[arg(short = 't', long, default_value_t = false)]
+    test: bool,
 
     /// Checks whether benchmarks are passing
     #[arg(short = 'p', long, default_value_t = false)]
     pass: bool,
 
     /// Runs benchmarks until exhaustion
-    #[arg(short = 'e', long, default_value_t = false)]
-    exhaust: bool,
+    #[arg(short = 'b', long, default_value_t = false)]
+    bench: bool,
+
+    /// Diffs the output against benchmarks.txt file
+    #[arg(short = 'd', long, default_value_t = false)]
+    diff: bool,
 }
 
 #[derive(Args, Debug)]
@@ -114,22 +119,23 @@ pub struct CliRun {
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
+    let log = Logger::new();
+
     let cli: Cli = Cli::parse();
-    if let Some(cmd) = cli.cmd {
-        match cmd {
-            CliCommand::Test => run_tests().await,
-            CliCommand::Bench(option) => run_benchmarks(option).await,
+    if let Some(CliCommand::Test(option)) = cli.cmd {
+        if let Err(err) = run_benchmarks(option).await {
+            log.println_err(&err.to_string());
+            exit(1);
         }
         exit(0);
     }
 
     if let Some(run) = cli.run {
-        let log = Logger::new();
         let mut hashcat = match configure(&run, &log) {
             Ok(hashcat) => hashcat,
             Err(err) => return log.println_err(&err.to_string()),
         };
-        let (_, finished) = match hashcat.run(&log).await {
+        let (_, finished) = match hashcat.run(&log, false).await {
             Ok(finished) => finished,
             Err(err) => return log.println_err(&err.to_string()),
         };
@@ -185,7 +191,7 @@ pub fn configure(cli: &CliRun, log: &Logger) -> Result<Hashcat> {
     log.heading("Seedcat Configuration");
     let format_address = format!("{} ({}) Address: ", address.kind.key, address.kind.name);
     log.print(format_address.as_str().bold());
-    log.println(format!("\n {}\n", address.formatted).as_str().stylize());
+    log.println(format!("{}\n", address.formatted).as_str().stylize());
     log.format_attempt("Derivations", &address.derivations);
     log.format_attempt("Seeds", &seed);
     if let Some(passphrase) = &passphrase {
