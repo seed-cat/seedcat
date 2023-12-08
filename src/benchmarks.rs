@@ -9,12 +9,12 @@ use crossterm::style::Stylize;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 
+use crate::{BenchOption, log_finished};
 use crate::combination::Combinations;
 use crate::logger::{Attempt, Logger, Timer};
 use crate::permutations::Permutations;
 use crate::seed::{Finished, Seed};
 use crate::tests::{run_tests, Test};
-use crate::{log_finished, BenchOption};
 
 struct Benchmark {
     name: String,
@@ -86,6 +86,9 @@ pub async fn run_benchmarks(mut option: BenchOption) -> Result<()> {
 
     if option.test {
         run_tests().await?;
+    }
+    if !option.bench && !option.pass {
+        return Ok(());
     }
 
     let mut count = 0;

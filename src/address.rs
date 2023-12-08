@@ -6,8 +6,7 @@ use anyhow::{bail, format_err, Result};
 use bitcoin::bip32::{ChildNumber, Xpub};
 use bitcoin::{Address, Network};
 
-// FIXME: Need this to be low for now or status updates are too slow
-const MAX_DERIVATIONS: usize = 10;
+const MAX_DERIVATIONS: usize = 100;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct AddressValid {
@@ -65,7 +64,7 @@ impl AddressValid {
             bail!("XPUBs do not require a derivation path to be specified");
         }
 
-        let derivations = Self::derivation(&kind, derivation)?;
+        let derivations = Self::derivation(&kind, derivation, MAX_DERIVATIONS)?;
 
         Ok(Self::new(address.to_string(), kind, derivations))
     }
@@ -105,7 +104,11 @@ impl AddressValid {
         bail!(error);
     }
 
-    fn derivation(kind: &AddressKind, arg: &Option<String>) -> Result<Derivations> {
+    fn derivation(
+        kind: &AddressKind,
+        arg: &Option<String>,
+        max_derivations: usize,
+    ) -> Result<Derivations> {
         let split = match arg {
             None => kind.derivations.clone(),
             Some(arg) => {
@@ -132,10 +135,11 @@ impl AddressValid {
                 Some(str) => str,
             };
 
-            let (derivation, arg) = Self::derivation_paths(derivation, derivations.len())?;
+            let (derivation, arg) =
+                Self::derivation_paths(derivation, derivations.len(), max_derivations)?;
             derivations.extend(derivation);
 
-            if derivations.len() <= MAX_DERIVATIONS && args.len() > 0 {
+            if derivations.len() <= max_derivations && args.len() > 0 {
                 args = Self::extend_paths(&args, &arg, ",");
             } else {
                 args.extend(arg);
@@ -145,7 +149,11 @@ impl AddressValid {
         Ok(Derivations { derivations, args })
     }
 
-    fn derivation_paths(derivation: &str, num_args: usize) -> Result<(Vec<String>, Vec<String>)> {
+    fn derivation_paths(
+        derivation: &str,
+        num_args: usize,
+        max_derivations: usize,
+    ) -> Result<(Vec<String>, Vec<String>)> {
         let mut derivations = vec!["m".to_string()];
         let mut args = vec!["m".to_string()];
 
@@ -161,7 +169,7 @@ impl AddressValid {
 
             derivations = Self::extend_paths(&derivations, &nodes, "/");
 
-            if num_args + derivations.len() > MAX_DERIVATIONS {
+            if num_args + derivations.len() > max_derivations {
                 args = Self::extend_paths(&args, &nodes, "/");
             } else {
                 args = Self::extend_paths(&args, &vec![path.to_string()], "/");
@@ -296,24 +304,25 @@ mod tests {
     #[test]
     fn parses_derivations() {
         let kind = AddressKind::new("", "", "", vec!["m/123".to_string()], false);
-        let derivation = AddressValid::derivation(&kind, &None).unwrap();
+        let derivation = AddressValid::derivation(&kind, &None, 1).unwrap();
         assert_eq!(derivation.args(), vec!["m/123".to_string()]);
 
-        let derivation = AddressValid::derivation(&kind, &Some("m/0,m/1'".to_string())).unwrap();
-        assert_eq!(derivation.args(), vec!["m/0,m/1'".to_string()]);
+        let derivation = AddressValid::derivation(&kind, &Some("m/0,m/1'".to_string()), 1).unwrap();
+        assert_eq!(derivation.args(), vec!["m/0", "m/1'"]);
 
-        let derivation = AddressValid::derivation(&kind, &Some("m/0 m/1/?2".to_string())).unwrap();
+        let derivation =
+            AddressValid::derivation(&kind, &Some("m/0 m/1/?2".to_string()), 10).unwrap();
         assert_eq!(derivation.args(), vec!["m/0,m/1/?2".to_string()]);
         assert_eq!(derivation.begin(), "m/0");
         assert_eq!(derivation.end(), "m/1/2");
         assert_eq!(derivation.total(), 4);
         assert_eq!(derivation.hash_ratio(), 4.0);
 
-        assert!(AddressValid::derivation(&kind, &Some("z/?2".to_string())).is_err());
+        assert!(AddressValid::derivation(&kind, &Some("z/?2".to_string()), 1).is_err());
 
         // splits if over 10
         let derivation =
-            AddressValid::derivation(&kind, &Some("m/?9'/9/?9|m/0/0".to_string())).unwrap();
+            AddressValid::derivation(&kind, &Some("m/?9'/9/?9|m/0/0".to_string()), 10).unwrap();
         assert_eq!(derivation.begin(), "m/0'/9/0");
         assert_eq!(derivation.end(), "m/0/0");
         assert_eq!(derivation.total(), 101);

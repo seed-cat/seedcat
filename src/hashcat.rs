@@ -2,7 +2,7 @@ use std::env;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStderr, ChildStdin, Command, Stdio};
 
 use anyhow::{format_err, Error, Result};
 use crossterm::style::Stylize;
@@ -21,6 +21,7 @@ use crate::seed::{Finished, Seed};
 
 const DEFAULT_MAX_HASHES: u64 = 10_000_000;
 const DEFAULT_MIN_PASSPHRASES: u64 = 10_000;
+const HC_PID_FILE: &str = "hashcat.pid";
 const HC_HASHES_FILE: &str = "_hashes.gz";
 const HC_ERROR_FILE: &str = "_error.log";
 const HC_OUTPUT_FILE: &str = "_output.log";
@@ -188,6 +189,10 @@ impl Hashcat {
     /// Runs the hashcat program
     pub async fn run(&mut self, log: &Logger, is_bench: bool) -> Result<(Timer, Finished)> {
         self.exe.cd_hashcat();
+
+        // Required on windows for stdin mode
+        File::create(HC_PID_FILE).expect("can create pid file");
+
         let mut args = self.hashcat_args.clone();
         args.push(self.hashfile());
 
@@ -210,8 +215,7 @@ impl Hashcat {
                 self.write_hashes(log, seed_rx, mode.hashes).await?;
 
                 let child = self.spawn_hashcat(&args, mode);
-                self.run_helper(child.stderr, child.stdout, log, is_bench)
-                    .await
+                self.run_helper(child, log, is_bench).await
             }
             // All args get passed to hashcat, hashfile filled with args
             HashcatRunner::BinaryCharsets(seed, passphrase) => {
@@ -224,8 +228,7 @@ impl Hashcat {
                 self.write_hashes(log, rx, mode.hashes).await?;
 
                 let child = self.spawn_hashcat(&args, mode);
-                self.run_helper(child.stderr, child.stdout, log, is_bench)
-                    .await
+                self.run_helper(child, log, is_bench).await
             }
             // Valid seeds and passphrases passed via stdin
             HashcatRunner::StdinMaxHashes | HashcatRunner::StdinMinPassphrases => {
@@ -234,31 +237,31 @@ impl Hashcat {
                 let rx = Self::spawn_arg_sender(&self.seed).await;
                 self.write_hashes(log, rx, mode.hashes).await?;
 
-                let child = self.spawn_hashcat(&args, mode);
-                let stdin = HashcatStdin::new(child.stdin, passphrase_args, &self.exe);
+                let mut child = self.spawn_hashcat(&args, mode);
+                let stdin = child.stdin.take();
+                let stdin = HashcatStdin::new(stdin, passphrase_args, &self.exe);
                 spawn(Self::stdin_sender(self.prefix.clone(), stdin, seed_rx));
 
-                self.run_helper(child.stderr, child.stdout, log, is_bench)
-                    .await
+                self.run_helper(child, log, is_bench).await
             }
         }
     }
 
     async fn run_helper(
         &self,
-        stderr: Option<ChildStderr>,
-        stdout: Option<ChildStdout>,
+        mut child: Child,
         log: &Logger,
         is_bench: bool,
     ) -> Result<(Timer, Finished)> {
         // multiplier is how many derivations and seeds are performed per hash
         let mut multiplier = self.seed.hash_ratio();
         multiplier *= self.address.derivations.hash_ratio();
+        let stderr = child.stderr.take();
         spawn(Self::run_stderr(stderr, self.file(HC_ERROR_FILE)?));
         let timer = log
             .time_verbose("Recovery Guesses", self.total(), multiplier as u64)
             .await;
-        let result = self.run_stdout(stdout, log, &timer, is_bench).await?;
+        let result = self.run_stdout(child, log, &timer, is_bench).await?;
         let found = self.seed.found(result)?;
         self.exe.cd_seedcat();
         Ok((timer, found))
@@ -315,6 +318,12 @@ impl Hashcat {
         cmd.arg("--status");
         cmd.arg("--self-test-disable");
         cmd.arg("--status-timer");
+        cmd.arg("1");
+        cmd.arg("--potfile-disable");
+
+        // FIXME: Tuning is needed for faster status updates
+        cmd.arg("--force");
+        cmd.arg("-n");
         cmd.arg("1");
 
         // -S mode is faster if we have <10M passphrases
@@ -461,7 +470,7 @@ impl Hashcat {
 
     async fn run_stdout(
         &self,
-        out: Option<ChildStdout>,
+        mut child: Child,
         log: &Logger,
         timer: &Timer,
         is_bench: bool,
@@ -470,7 +479,7 @@ impl Hashcat {
 
         let address = self.address.formatted.clone();
         let mut file = self.file(HC_OUTPUT_FILE)?;
-        let out = out.expect("Pipes stdout");
+        let out = child.stdout.take().expect("Pipes stdout");
         let address = format!("{}:", address);
         let reader = BufReader::new(out);
         log.println("Waiting for GPU initialization please be patient...".bold());
@@ -489,6 +498,7 @@ impl Hashcat {
                 let total = num.parse::<u64>().expect("is num");
                 timer.store(total);
             } else if line.contains(&address) {
+                child.kill().expect("can kill process");
                 timer.end();
                 if let Some(handle) = handle {
                     handle.await.expect("Logging finishes");
@@ -500,6 +510,7 @@ impl Hashcat {
             writeln!(file, "{}", line).map_err(Error::from)?;
             file.flush().map_err(Error::from)?;
         }
+        child.kill().expect("can kill process");
         timer.end();
         if let Some(handle) = handle {
             handle.await.expect("Logging finishes");

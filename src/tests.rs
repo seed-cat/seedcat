@@ -4,10 +4,10 @@ use anyhow::{bail, Result};
 use clap::Parser;
 use crossterm::style::Stylize;
 
+use crate::{Cli, configure};
 use crate::hashcat::{Hashcat, HashcatRunner};
 use crate::logger::Logger;
 use crate::seed::Finished;
-use crate::{configure, Cli};
 
 static TEST_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -23,8 +23,6 @@ impl Test {
         args.insert(0, "");
         args.push("-y");
         args.push("--");
-        args.push("--session");
-        args.push(prefix);
 
         let cli = Cli::parse_from(args).run.unwrap();
         let mut hashcat = configure(&cli, &log).unwrap();
@@ -116,10 +114,10 @@ pub async fn run_tests() -> Result<()> {
     tests.test_stdin("-a 39zQn8yBDmUHswRYUgjwwEe6y5b6wDTUTi -s skill,check,filter,camera,pond,oppose,lesson,delay,rare,prepare,oak,bring,tape,fancy,pulp,voyage,coil,spot,faculty,nominee,rough,stick,?,enter",
                      "skill,check,filter,camera,pond,oppose,lesson,delay,rare,prepare,oak,bring,tape,fancy,pulp,voyage,coil,spot,faculty,nominee,rough,stick,wide,enter");
 
-    tests.test_stdin("-a bc1qscpdw0smafzpwe5s9kjfstq48p6vcz0n30sccs -s p?,stumble,print,mansion,occur,client,deposit,electric,dance,olive,stay,mom -d m/0/0/?2,m/84'/0'/?2'/0/?3",
+    tests.test_stdin("-a bc1qscpdw0smafzpwe5s9kjfstq48p6vcz0n30sccs -s p?,stumble,print,mansion,occur,client,deposit,electric,dance,olive,stay,mom -d m/0/0/?99,m/84'/0'/?2'/0/?3",
                      "private,stumble,print,mansion,occur,client,deposit,electric,dance,olive,stay,mom");
 
-    tests.test_binary("-a bc1qscpdw0smafzpwe5s9kjfstq48p6vcz0n30sccs -s private,stumble,print,mansion,occur,client,deposit,electric,dance,olive,stay,? -d m/0/0/?2|m/84'/0'/?2'/0/?3",
+    tests.test_binary("-a bc1qscpdw0smafzpwe5s9kjfstq48p6vcz0n30sccs -s private,stumble,print,mansion,occur,client,deposit,electric,dance,olive,stay,? -d m/0/0/?99|m/84'/0'/?2'/0/?3",
                      "private,stumble,print,mansion,occur,client,deposit,electric,dance,olive,stay,mom");
 
     tests.test_both("-a xpub661MyMwAqRbcF5snxLXxdet4WwyipbK6phjJdy5ViauCkTSjQc37zm6Gyyryq1aF8Uuj4Xub9Bh7LfQo8ZmNujZVczj1FVs1wMDWrnTym39 -s very,cart,matter,object,raise,predict,water,term,easy,play,?,earn -p hashca?2 -2 zt",

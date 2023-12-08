@@ -473,8 +473,9 @@ fn wildcards(charsets: &UserCharsets) -> Result<BTreeMap<char, Wildcard>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::passphrase::*;
     use std::fs::remove_file;
+
+    use crate::passphrase::*;
 
     #[tokio::test]
     async fn passphrase_generates_args() {
@@ -483,8 +484,19 @@ mod tests {
         assert_eq!(args.unwrap(), vec!["-a", "3", "?2", "-2", "a"]);
     }
 
+    fn bitfile(num: usize) -> String {
+        let root = PathBuf::from_iter(vec!["hashcat", "charsets", "bin"].iter());
+        let bit = root.join(format!("{}bit.hcchr", num));
+        bit.into_os_string().into_string().unwrap()
+    }
+
     #[tokio::test]
     async fn passphrase_can_add_binary_charsets() {
+        let bit2 = bitfile(2);
+        let bit3 = bitfile(3);
+        let bit5 = bitfile(5);
+        let bit6 = bitfile(6);
+
         let pp = Passphrase::from_arg(
             &vec!["test?d".to_string()],
             &vec![None, Some("a".to_string())],
@@ -493,7 +505,10 @@ mod tests {
         let pp_with_bin = pp.add_binary_charsets(3, 2).unwrap().unwrap();
         assert_args(
             pp_with_bin.build_args("", &Logger::off()).await,
-            "-a 3 ?1?3?1?3?4test?d -1 hashcat/charsets/bin/5bit.hcchr -2 a -3 hashcat/charsets/bin/6bit.hcchr -4 hashcat/charsets/bin/2bit.hcchr"
+            &format!(
+                "-a 3 ?1?3?1?3?4test?d -1 {} -2 a -3 {} -4 {}",
+                bit5, bit6, bit2
+            ),
         );
         assert_eq!(pp_with_bin.total(), 10 * 2048 * 2048 * 2_u64.pow(2));
 
@@ -501,7 +516,10 @@ mod tests {
         let pp_with_bin = pp.add_binary_charsets(3, 3).unwrap().unwrap();
         assert_args(
             pp_with_bin.build_args("hc", &Logger::off()).await,
-            "-a 7 ?1?2?1?2?3 hc_right.gz -1 hashcat/charsets/bin/5bit.hcchr -2 hashcat/charsets/bin/6bit.hcchr -3 hashcat/charsets/bin/3bit.hcchr"
+            &format!(
+                "-a 7 ?1?2?1?2?3 hc_right.gz -1 {} -2 {} -3 {}",
+                bit5, bit6, bit3
+            ),
         );
         assert_eq!(pp_with_bin.total(), 2048 * 2048 * 2_u64.pow(3));
         remove_file("hc_right.gz").unwrap();
