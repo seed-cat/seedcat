@@ -65,9 +65,9 @@ pub struct BenchOption {
     #[arg(short = 'b', long, default_value_t = false)]
     bench: bool,
 
-    /// Diffs the output against benchmarks.txt file
-    #[arg(short = 'd', long, default_value_t = false)]
-    diff: bool,
+    /// Diffs the output against benchmarks_<suffix>.txt file
+    #[arg(short = 'd', long, value_name = "suffix")]
+    diff: Option<String>,
 }
 
 #[derive(Args, Debug)]

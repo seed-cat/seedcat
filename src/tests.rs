@@ -4,10 +4,10 @@ use anyhow::{bail, Result};
 use clap::Parser;
 use crossterm::style::Stylize;
 
-use crate::{Cli, configure};
 use crate::hashcat::{Hashcat, HashcatRunner};
 use crate::logger::Logger;
 use crate::seed::Finished;
+use crate::{configure, Cli};
 
 static TEST_COUNT: AtomicUsize = AtomicUsize::new(0);
 

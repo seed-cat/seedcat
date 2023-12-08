@@ -33,7 +33,7 @@ rm -f "$PROJECT_NAME.zip"
 cp "./$SC/target/x86_64-pc-windows-gnu/release/seedcat.exe" $SC
 cp "./$SC/target/x86_64-unknown-linux-gnu/release/seedcat" $SC
 
-zip -r "$PROJECT_NAME.zip" . -i $SC/benchmarks.txt  $SC/scripts/* $SC/dicts/* $HC/hashcat.exe $HC/hashcat.bin $HC/hashcat.hcstat2 \
+zip -r "$PROJECT_NAME.zip" . -i $SC/docs/*  $SC/scripts/* $SC/dicts/* $HC/hashcat.exe $HC/hashcat.bin $HC/hashcat.hcstat2 \
 $HC/modules/*.so $HC/modules/*.dll $HC/OpenCL/*.cl $HC/OpenCL/*.h $HC/charsets/* $HC/charsets/*/*
 
 zip -r "$PROJECT_NAME.zip" -m $SC/seedcat.exe $SC/seedcat

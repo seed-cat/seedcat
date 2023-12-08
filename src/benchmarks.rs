@@ -9,12 +9,12 @@ use crossterm::style::Stylize;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 
-use crate::{BenchOption, log_finished};
 use crate::combination::Combinations;
 use crate::logger::{Attempt, Logger, Timer};
 use crate::permutations::Permutations;
 use crate::seed::{Finished, Seed};
 use crate::tests::{run_tests, Test};
+use crate::{log_finished, BenchOption};
 
 struct Benchmark {
     name: String,
@@ -46,7 +46,7 @@ pub async fn run_benchmarks(mut option: BenchOption) -> Result<()> {
 
     if option.release {
         option.test = true;
-        option.diff = true;
+        option.diff = Some("3090".to_string());
         option.bench = true;
         option.pass = true
     }
@@ -70,18 +70,19 @@ pub async fn run_benchmarks(mut option: BenchOption) -> Result<()> {
     benchmarks.push(Benchmark::new("Small passphrase + seed", "-s ?,moral,begin,apology,cheap,va?,clerk,limb,shaft,salt,citizen,awesome -p ?d?d -a 1DrJAfW6TY6X3q6SBmZHAUddfodzEuz6Mg"));
     benchmarks.push(Benchmark::new("Large passphrase + seed", "-s ?,moral,begin,apology,cheap,vast,clerk,limb,shaft,salt,citizen,awesome -p ?d?d?d?d?d -a 1FRm26FwcVtnRe2q8fHdd9c11UEEH5EYUo"));
 
-    let file = if option.diff {
-        option.bench = true;
-        let file = parse_benchmarks_file()?;
-        for benchmark in &benchmarks {
-            if !file.contains_key(&benchmark.name) {
-                let err = format!("Missing '{}' from benchmark.txt", benchmark.name);
-                log.println_err(&err);
+    let file = match option.diff {
+        None => None,
+        Some(suffix) => {
+            option.bench = true;
+            let file = parse_benchmarks_file(suffix)?;
+            for benchmark in &benchmarks {
+                if !file.contains_key(&benchmark.name) {
+                    let err = format!("Missing '{}' from benchmark.txt", benchmark.name);
+                    log.println_err(&err);
+                }
             }
+            Some(file)
         }
-        Some(file)
-    } else {
-        None
     };
 
     if option.test {
@@ -182,13 +183,15 @@ struct BenchmarkFile {
     speed: f64,
 }
 
-fn parse_benchmarks_file() -> Result<BTreeMap<String, BenchmarkFile>> {
-    let path = match File::open("benchmarks.txt").and_then(io::read_to_string) {
-        Ok(path) => path,
-        Err(_) => bail!("Unable to read 'benchmarks.txt'"),
+fn parse_benchmarks_file(suffix: String) -> Result<BTreeMap<String, BenchmarkFile>> {
+    let name = format!("benchmarks_{}.txt", suffix);
+    let path = PathBuf::from("docs").join(&name);
+    let text = match File::open(path).and_then(io::read_to_string) {
+        Ok(text) => text,
+        Err(_) => bail!("Unable to read '{}'", name),
     };
     let mut map = BTreeMap::new();
-    for line in path.lines().skip(1) {
+    for line in text.lines().skip(1) {
         let mut split = line.split("|");
         let name = split.next().expect("has column 1");
         let guesses = split.next().expect("has column 2");
