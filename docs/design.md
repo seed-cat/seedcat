@@ -1,11 +1,13 @@
-# seedcat design
-What makes `seedcat` the world's fastest seed word and passphrase recovery tool?
+# Seedcat design
+Over time, bitcoin users are switching from [insecure brain wallets](https://fc16.ifca.ai/preproceedings/36_Vasek.pdf) to modern wallets that implement [BIP39](https://en.bitcoin.it/wiki/BIP_0039) seed phrases.
 
-`seedcat` consists of two components:
+Yet no fast recovery tool existed recovering modern wallets.
+
+`seedcat` was designed to be the world's fastest BIP39 recovery tool through two components:
 - A backend in C that leverages the GPU-optimized algorithms from being a [hashcat](https://hashcat.net/wiki/) module
 - A frontend CLI in Rust that simplifies the recovery for users and generates valid seeds in parallel
 
-## hashcat backend
+# Hashcat backend
 The most expensive part of generating private keys from seed phrases is 2048 iterations of the PBKDF2-HMAC-SHA512 algorithm.  Luckily we can easily run this algorithm in parallel on GPUs and hashcat already has the fastest implementation.
 
 If the user has the master XPUB we already have 128-bits of entropy we can check our hash against.  Otherwise we need to perform some ECC operations that are also optimized in hashcat.
@@ -14,7 +16,7 @@ The most complicated aspect of the module is the guessing of seed words because 
 
 Unfortunately GPUs do not perform well with branching code that would be required to filter seeds so we perform filtering on the CPU and send it to the hashcat module running on the GPU through stdin or the hashes file.
 
-## seedcat frontend
+# Seedcat frontend
 The frontend determines the fastest way we can run the recovery.  There are 3 modes that `seedcat` can run in:
 - **Pure GPU** - if performing a passphrase attack with <10M valid seeds we pregenerate all valid seeds and put them in the hashes file
 - **Binary charsets** - if the last word is `?` then we can pass in the seed entropy directly and no seed filtering is required since we can quickly generate the checksum on the GPU
@@ -24,8 +26,8 @@ Generating and filtering valid seeds also needs to be multithreaded and fast so 
 
 The rest of the frontend is dedicated to providing a more user-friendly UX.  For instance we validate user inputs, provide total counts, and examples so a user can understand what is actually being guessed.
 
-## benchmarks
-Of course we cannot claim to be the world's fastest recovery tool without some comparisons.
+# Benchmarks
+We cannot claim to be the world's fastest recovery tool without some comparisons.
 
 As far as we could find there were only two GPU-optimized versions of seed phrase recovery ever written: [btcrecover](https://github.com/gurnec/btcrecover) and John Cantrell's [one-off implementation](https://medium.com/@johncantrell97/how-i-checked-over-1-trillion-mnemonics-in-30-hours-to-win-a-bitcoin-635fe051a752).  Since both implementations have fallen out of maintenance, we already can provide a better user experience that is easier to get working.
 
