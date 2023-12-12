@@ -301,6 +301,7 @@ impl Logger {
         while let Some(line) = split.next() {
             self.println(line.stylize());
         }
+        self.println("\n If you found a bug please report it here: https://github.com/seed-cat/seedcat/issues".stylize());
     }
 
     /// Println stylized text

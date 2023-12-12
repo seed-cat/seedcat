@@ -157,11 +157,7 @@ pub fn log_finished(finished: &Finished, log: &Logger) {
                 log.println(passphrase.as_str().stylize());
             }
         }
-        _ => log.println(
-            "Exhausted search with no results...try with different parameters"
-                .bold()
-                .dark_red(),
-        ),
+        _ => log.println_err("Exhausted search with no results...try with different parameters"),
     }
     log.println("".stylize());
 }
