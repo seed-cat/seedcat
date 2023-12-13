@@ -85,7 +85,7 @@ pub struct CliRun {
     derivation: Option<String>,
 
     /// Dictionaries and/or mask e.g. './dict.txt' '?l?l?l?d?1'
-    #[arg(short, long, value_name = "MASK|DICT", num_args = 1.., value_delimiter = ' ')]
+    #[arg(short, long, value_name = "MASK|DICT")]
     passphrase: Option<Vec<String>>,
 
     /// Guess all permutations of a # of seed words

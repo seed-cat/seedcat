@@ -2,4 +2,4 @@ target/
 .idea
 *.iml
 *.tmp
-*.zip
+*.zip*

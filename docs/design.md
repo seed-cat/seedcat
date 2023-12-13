@@ -1,9 +1,11 @@
 # Seedcat design
-Over time, bitcoin users are switching from [insecure brain wallets](https://fc16.ifca.ai/preproceedings/36_Vasek.pdf) to modern wallets that implement [BIP39](https://en.bitcoin.it/wiki/BIP_0039) seed phrases.
+Bitcoin users are switching from [insecure brain wallets](https://fc16.ifca.ai/preproceedings/36_Vasek.pdf) to modern wallets that implement [BIP39](https://en.bitcoin.it/wiki/BIP_0039) seed phrases.
 
-Yet no fast recovery tool existed recovering modern wallets.
+Over the next decade these wallets will likely predominate bitcoin usage.
 
-`seedcat` was designed to be the world's fastest BIP39 recovery tool through two components:
+Yet no optimized recovery tool existed for recovering these wallets.
+
+`seedcat` was designed to be the fastest modern wallet recovery tool through two components:
 - A backend in C that leverages the GPU-optimized algorithms from being a [hashcat](https://hashcat.net/wiki/) module
 - A frontend CLI in Rust that simplifies the recovery for users and generates valid seeds in parallel
 

@@ -28,6 +28,7 @@ Total Guesses: 17.2B
 - The address is determined based on whether it starts with `xpub661MyMwAqRbc`, `1`, `3`, or `bc1` respectively
 - We recommend using `XPUB` which offers ~2x the speed and works on non-standard derivation paths and scripts
 - Standard derivation paths are chosen that assume you provided your first wallet address (a path ending in `/0`)
+- If you are unsure which derivation path your address is from check [your wallet documentation](https://walletsrecovery.org/)
 - For custom derivation paths see the [derivations section](#derivations)
 
 `Seeds` shows how many different combinations of seed words `seedcat` will attempt
@@ -43,9 +44,8 @@ Let's try again with constraints on the second word:
 seedcat --address "1AtD3g5AmR4fMsCRa1haNGmvCTVWq7YfzD" \
  --seed "? do?|da? ? ethics vapor struggle ramp dune join nothing wait length"
 ```
-The number of guesses is reduced from `17.2B` to `193M` making our recovery **~90x** faster!
 
-Use constraints wisely to make seed recovery possible.
+Use constraints to make seed recovery faster:
 
 ```
 Seeds: 96.5M
@@ -56,6 +56,8 @@ Total Guesses: 193M
 
 Continue with recovery [Y/n]?
 ```
+
+The number of guesses is reduced from `17.2B` to `193M` making our recovery **~90x** faster!
 
 Once you choose to continue you will see updates from the recovery status:
 ```
@@ -105,13 +107,15 @@ Note you may use the `?` wildcard with any of the permuted or anchored words.
 Using `^` anchors greatly reduces the number of guesses that `seedcat` needs to make.
 
 # Passphrase Recovery
-Bitcoin passphrases (sometimes misleadingly called the 25th word) are arbitrary strings of text that are added to your seed words.  Wallets often prompt users to back up their seed words, but users may be tempted to memorize their passphrases leading to possible loss.
+Bitcoin passphrases (sometimes misleadingly called the 25th word) are arbitrary strings of text that are added to your seed words.
+
+Wallets often prompt users to back up their seed words, but users may be tempted to memorize their passphrases leading to possible loss.
 
 The `--passphrase` option allows you to specify how to attack the passphrase
-- Mask attacks allow you to use [hashcat wildcards](https://hashcat.net/wiki/doku.php?id=mask_attack) such as `?d` for digits and `?l` for lowercase letters
-- Dictionary attacks allow you to specify newline-separated text files containing words to try
-- The option accepts up to 2 arguments if you wish to combine attacks
-- Guessing seed words and passphrases at the same time is possible but multiplies the guesses
+- **Mask attacks** allow you to use [hashcat wildcards](https://hashcat.net/wiki/doku.php?id=mask_attack) such as `?d` for digits and `?l` for lowercase letters
+- **Dictionary attacks** allow you to specify newline-separated text files containing words to try
+- You can use the `--passphrase` option twice to combine attacks
+- Guessing both seed words and passphrases is possible but multiplies the number of guesses
 
 ## Mask attacks
 If you need to guess a passphrase `"secret"` followed by 3 digits using `--passphrase` argument:
@@ -122,7 +126,7 @@ seedcat --address "1Aa7DosYfoYJwZDmMPPTqtH7dXUehYbyMu" \
  --passphrase "secret?d?d?d"
 ```
 
-Just as with the seed guessing we get a preview of what passphrases will be guessed:
+Just as with seed guessing we get a preview of what passphrases will be guessed:
 ```
 Passphrases: 1.00K
  Begin: secret000
@@ -139,7 +143,7 @@ Found Passphrase: secret123
 Dictionary attacks require you have a text file in the `seedcat` folder.  We provide english dictionaries of various lengths (sorted by word frequency) in the `seedcat/dicts` folder you can use.
 - Specify a dictionary file using the relative path starting with `./` and separated by `/`
 - We use this format regardless of your platform so that commands are portable
-- To  separate multiple dictionaries or delimiters use `,`
+- To separate multiple dictionaries or add text delimiters use `,`
 
 If you want to guess 1 lowercase word and 1 uppercase word separated by `"-"` using the `--passphrase` argument:
 ```bash
@@ -166,29 +170,28 @@ Note that a single dictionary attack is limited to 1 billion guesses.
 ## Combining attacks
 You may wish to combine attacks to try a dictionary of words followed by wildcards or to combine 2 dictionary attacks.
 
-For example if you want to guess 3 letters followed by `"..."` and an unknown word:
+For example if you want to guess 3 letters followed by `" "` and an unknown word:
 ```bash
-seedcat --address "1CeQyCWLMeS3xc9xok2GEZPXGP7YBj6fwo" \
+seedcat --address "1CUFN2jAH3FVcBUU1r4qadHnhvo7Ywsi1v" \
  --seed "toy donkey chaos ethics vapor struggle ramp dune join nothing wait length" \
- --passphrase "?l?l?l..." "./dicts/1k.txt"
+ --passphrase "?u?u?u " --passphrase "./dicts/1k_cap.txt"
 ```
 
-The preview reveals we are guessing `a-z` followed by a word from the dictionary:
+The preview reveals we are guessing `A-Z` followed by a word from the dictionary:
 ```
 Passphrases: 17.6M
- Begin: aaa...the
- End:   zzz...entry
+ Begin: AAA the
+ End:   ZZZ entry
 ```
 
 The result:
 ```
 Found Seed: toy,donkey,chaos,ethics,vapor,struggle,ramp,dune,join,nothing,wait,length
-Found Passphrase: abc...books
+Found Passphrase: ABC Books
 ```
 
 # Derivations
 Derivations are chosen by default based on your address, however some wallets use non-standard derivation paths.
-- If you are unsure which derivation path your address is from check [your wallet documentation](https://walletsrecovery.org/)
 - Every derivation path increases the number of guesses so try to use only 1 if possible
 - Or for the fastest speed use `XPUB` which doesn't use derivations at all
 - The [mnemonic code converter](https://iancoleman.io/bip39/) provides an useful demo of standard address derivations

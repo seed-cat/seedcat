@@ -64,9 +64,9 @@ pub async fn run_benchmarks(mut option: BenchOption) -> Result<()> {
     benchmarks.push(Benchmark::new("Permute 12 of 24 words", "-s ^aim,^twin,^nest,^escape,^combine,^lady,^grant,^ocean,^olympic,^post,^silent,^exist,burger,amateur,physical,muscle,blossom,series,because,dress,cradle,zone,dove,kick -c 24 -a 18qfTDrgRZa3ASKy6erJUCWLARaiFNyLty"));
     benchmarks.push(Benchmark::new("Missing last words of 12", "-s dad,moral,begin,apology,cheap,va?,clerk,limb,shaft,salt,?,? -a 13PciouesvLmVAvmNxW4RhZyDkCGuqpwRY"));
     benchmarks.push(Benchmark::new("Missing last words of 24", "-s ai?,twin,nest,escape,combine,lady,grant,ocean,olympic,post,si?,exist,burger,amateur,physical,muscle,blossom,series,because,dress,cradle,zone,?,? -a 18qfTDrgRZa3ASKy6erJUCWLARaiFNyLty"));
-    benchmarks.push(Benchmark::new("Passphrase dict+dict attack", "-s dad,moral,begin,apology,cheap,vast,clerk,limb,shaft,salt,citizen,awesome -p ./dicts/100k.txt,~ ./dicts/10k_upper.txt -a 17whoxEdasBPiEWKU1kjreNBaGBDzp2woS"));
-    benchmarks.push(Benchmark::new("Passphrase dict+mask attack", "-s dad,moral,begin,apology,cheap,vast,clerk,limb,shaft,salt,citizen,awesome -p ./dicts/100k.txt ~?d?d?d -a 1Q6hStQLwApp4DERF57A5pJu9VsogRvCRA"));
-    benchmarks.push(Benchmark::new("Passphrase mask+dict attack", "-s dad,moral,begin,apology,cheap,vast,clerk,limb,shaft,salt,citizen,awesome -p ?d?d?d ~,./dicts/100k.txt -a 1JVJrrWwaCS4FVREVNLULLGqZSqFC8dV9P"));
+    benchmarks.push(Benchmark::new("Passphrase dict+dict attack", "-s dad,moral,begin,apology,cheap,vast,clerk,limb,shaft,salt,citizen,awesome -p ./dicts/100k.txt,~ -p ./dicts/10k_upper.txt -a 17whoxEdasBPiEWKU1kjreNBaGBDzp2woS"));
+    benchmarks.push(Benchmark::new("Passphrase dict+mask attack", "-s dad,moral,begin,apology,cheap,vast,clerk,limb,shaft,salt,citizen,awesome -p ./dicts/100k.txt -p ~?d?d?d -a 1Q6hStQLwApp4DERF57A5pJu9VsogRvCRA"));
+    benchmarks.push(Benchmark::new("Passphrase mask+dict attack", "-s dad,moral,begin,apology,cheap,vast,clerk,limb,shaft,salt,citizen,awesome -p ?d?d?d -p ~,./dicts/100k.txt -a 1JVJrrWwaCS4FVREVNLULLGqZSqFC8dV9P"));
     benchmarks.push(Benchmark::new("Small passphrase + seed", "-s ?,moral,begin,apology,cheap,va?,clerk,limb,shaft,salt,citizen,awesome -p ?d?d -a 1DrJAfW6TY6X3q6SBmZHAUddfodzEuz6Mg"));
     benchmarks.push(Benchmark::new("Large passphrase + seed", "-s ?,moral,begin,apology,cheap,vast,clerk,limb,shaft,salt,citizen,awesome -p ?d?d?d?d?d -a 1FRm26FwcVtnRe2q8fHdd9c11UEEH5EYUo"));
 

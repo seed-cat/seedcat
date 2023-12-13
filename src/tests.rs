@@ -123,13 +123,13 @@ pub async fn run_tests() -> Result<()> {
     tests.test_both("-a xpub661MyMwAqRbcF5snxLXxdet4WwyipbK6phjJdy5ViauCkTSjQc37zm6Gyyryq1aF8Uuj4Xub9Bh7LfQo8ZmNujZVczj1FVs1wMDWrnTym39 -s very,cart,matter,object,raise,predict,water,term,easy,play,?,earn -p hashca?2 -2 zt",
                      "very,cart,matter,object,raise,predict,water,term,easy,play,give,earn hashcat");
 
-    tests.test_both("-a 1AeC6MA7U651BTVS5hWTGi5u9Z7tGtkE6y -s very,cart,matter,object,raise,predict,water,term,easy,play,give,earn -p ./dicts/test.txt,-,./dicts/test_cap.txt,- ./dicts/test.txt",
+    tests.test_both("-a 1AeC6MA7U651BTVS5hWTGi5u9Z7tGtkE6y -s very,cart,matter,object,raise,predict,water,term,easy,play,give,earn -p ./dicts/test.txt,-,./dicts/test_cap.txt,- -p ./dicts/test.txt",
                     "very,cart,matter,object,raise,predict,water,term,easy,play,give,earn the-Of-and");
 
-    tests.test_both("-a 1Gmu1iEtjmnhrB8svoFDiFjYsc4sqXuU7z -s very,cart,matter,object,raise,predict,water,term,easy,play,give,earn -p ./dicts/test.txt,-- ?d",
+    tests.test_both("-a 1Gmu1iEtjmnhrB8svoFDiFjYsc4sqXuU7z -s very,cart,matter,object,raise,predict,water,term,easy,play,give,earn -p ./dicts/test.txt,-- -p ?d",
                     "very,cart,matter,object,raise,predict,water,term,easy,play,give,earn and--2");
 
-    tests.test_both("-a 1Hv3dB4JyhDBwo1vDzPKKJZp4SpxaoES6L -s very,cart,matter,object,raise,predict,water,term,easy,play,give,earn -p ?d?d-- ./dicts/test.txt",
+    tests.test_both("-a 1Hv3dB4JyhDBwo1vDzPKKJZp4SpxaoES6L -s very,cart,matter,object,raise,predict,water,term,easy,play,give,earn -p ?d?d-- -p ./dicts/test.txt",
                     "very,cart,matter,object,raise,predict,water,term,easy,play,give,earn 12--the");
 
     tests.test_both("-a 18zpD3jMSrHAYoA1XcDLshXPJA46DocVNi -s very,cart,matter,object,raise,predict,water,term,easy,play,give,earn -p ?dmask?d",

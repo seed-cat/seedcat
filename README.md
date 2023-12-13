@@ -1,9 +1,11 @@
 # seedcat
 The [world's fastest](docs/design.md#benchmarks) bitcoin seed word and passphrase recovery tool.
 
-If you lost your [BIP39 seed phrase](https://en.bitcoin.it/wiki/Seed_phrase) information this tool can recover access to your bitcoin.
+If you lost your [seed phrase](https://en.bitcoin.it/wiki/Seed_phrase) information this tool can recover access to your bitcoin.
 
 No need to trust third-party services who charge up to 20% of your funds.
+
+`seedcat` is free and open-source software you can run on your own machine.
 
 ## Setup
 
@@ -28,7 +30,7 @@ Primary key fingerprint: D249 C16D 6624 F2C1 DD0A  C20B 7E1F 90D3 3230 660A
 ## Usage
 Run `seedcat` on Linux or `seedcat.exe` on Windows to see the command-line options.
 
-See our [recovery documentation](docs/recovery.md) for detailed instructions.
+See our [recovery documentation](docs/recovery.md) for detailed examples.
 
 ## Security
 Since `seedcat` outputs your seed phrase anyone with access to your machine could steal your bitcoin.
