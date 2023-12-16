@@ -1,14 +1,15 @@
-# For releasing a new executable
+# Builds a new seedcat_*.zip release
 #
-# Releases are built in a Ubunutu 18.04 image https://releases.ubuntu.com/18.04/
+# Releases are built in a Ubuntu 18.04 Desktop image https://releases.ubuntu.com/18.04/
 # Ensures >2018-02-01 GLIBC compatibility and support until April 2028
-# objdump -T hashcat.bin | grep GLIBC | sed 's/.*GLIBC_\([.0-9]*\).*/\1/g' | sort -Vu
-# Machine setup is as follows for cross-compiling:
+# You can run the image in VirtualBox or similar VM software
+# Setup your Ubuntu VM for builds with the following commands:
 #
+# su
 # sudo apt update
-# sudo apt install gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 make git curl
-# git clone https://github.com/hashcat/hashcat
-# git clone https://github.com/win-iconv/win-iconv
+# sudo apt install gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 git curl -y
+# git clone https://github.com/seed-cat/seedcat
+# git clone https://github.com/seed-cat/win-iconv
 # cd win-iconv/
 # patch < ../hashcat/tools/win-iconv-64.diff
 # sudo make install

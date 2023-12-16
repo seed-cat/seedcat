@@ -6,7 +6,7 @@ Over the next decade these wallets will likely predominate bitcoin usage.
 Yet no optimized recovery tool existed for recovering these wallets.
 
 `seedcat` was designed to be the fastest modern wallet recovery tool through two components:
-- A backend in C that leverages the GPU-optimized algorithms from being a [hashcat](https://hashcat.net/wiki/) module
+- A backend in C that leverages the GPU-optimized algorithms from being a [hashcat](https://hashcat.net/wiki/) plugin
 - A frontend CLI in Rust that simplifies the recovery for users and generates valid seeds in parallel
 
 # Hashcat backend
@@ -14,7 +14,7 @@ The most expensive part of generating private keys from seed phrases is 2048 ite
 
 If the user has the master XPUB we already have 128-bits of entropy we can check our hash against.  Otherwise we need to perform some ECC operations that are also optimized in hashcat.
 
-The most complicated aspect of the module is the guessing of seed words because we need to take advantage of the [BIP-39 checksum](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki#generating-the-mnemonic).  With 12 seed words we can filter for 1/16 the seed phrases and with 24 seed words we can filter for 1/256 the seed phrases, translating to a 10-100x improvement in speed.
+The most complicated aspect of the plugin is the guessing of seed words because we need to take advantage of the [BIP-39 checksum](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki#generating-the-mnemonic).  With 12 seed words we can filter for 1/16 the seed phrases and with 24 seed words we can filter for 1/256 the seed phrases, translating to a 10-100x improvement in speed.
 
 Unfortunately GPUs do not perform well with branching code that would be required to filter seeds so we perform filtering on the CPU and send it to the hashcat module running on the GPU through stdin or the hashes file.
 
@@ -47,6 +47,6 @@ In fact we had trouble getting either implementation running with CUDA so we had
 
 We can see that `seedcat` offers around a **10-100x** improvement in speed.   The improvement against btcrecover is likely because it isn't filtering invalid checksums in a fast way and its passphrase attack isn't GPU-optimized.
 
-Against the johncantrell97 implementation the speed-up is smaller and occurs due to slightly better optimized algorithms.  Note that if we attack the master XPUB instead of the address we could gain an additional 2x speed-up.  His implementation also was written as a one-off to win a contest so doesn't support passphrases or any other kinds of attack.
+Against the johncantrell97 implementation the speed-up is smaller and occurs due to better GPU optimizations.  Note that if we attack the master XPUB instead of the address we could gain an additional 2x speed-up.  His implementation was also written as a one-off to win a contest so doesn't support passphrases or any other kinds of attack.
 
 In comparisons against CPU-only recovery tools we generally see a **>50x** improvement in speed which easily gets much higher if running on powerful GPU clusters.  On a 8x 4090 RTX cluster we measured a **447x** improvement over a CPU-based implementation.

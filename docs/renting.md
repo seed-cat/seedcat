@@ -10,14 +10,14 @@ Run commands to copy the `seedcat` zip file to the machine, replacing the IP and
 ```bash
 SSH_IP="86.127.240.108" # CHANGE THIS
 SSH_PORT="25128"  # CHANGE THIS
-scp -P $SSH_PORT seedcat*.zip root@$SSH_IP:/root/
+scp -P $SSH_PORT seedcat_*.zip root@$SSH_IP:/root/
 ssh -p $SSH_PORT root@$SSH_IP -L 8080:localhost:8080
 ```
 
 Then once you SSH into the machine run the following:
 ```
 sudo apt-get install unzip -y
-unzip seedcat*zip
+unzip seedcat_*.zip
 cd seedcat
 ```
 

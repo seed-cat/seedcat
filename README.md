@@ -1,7 +1,7 @@
 # seedcat
 The [world's fastest](docs/design.md#benchmarks) bitcoin seed word and passphrase recovery tool.
 
-If you lost your [seed phrase](https://en.bitcoin.it/wiki/Seed_phrase) information this tool can recover access to your bitcoin.
+If you lost some of your [mnemonic phrase](https://en.bitcoin.it/wiki/Seed_phrase) this tool can restore access to your bitcoin.
 
 No need to trust third-party services who charge up to 20% of your funds.
 
@@ -16,7 +16,7 @@ No need to trust third-party services who charge up to 20% of your funds.
 Optionally you can verify the release like so:
 ```
 gpg --keyserver keyserver.ubuntu.com --recv-keys D249C16D6624F2C1DD0AC20B7E1F90D33230660A
-gpg --verify seedcat_0.0.1.zip.sig
+gpg --verify seedcat_*.zip.sig
 ```
 
 You should get the result:
@@ -38,6 +38,11 @@ Since `seedcat` outputs your seed phrase anyone with access to your machine coul
 - Do not enable internet access until you have swept your funds to a new wallet
 - If renting in the cloud make sure you trust the datacenter host
 - For large amounts of bitcoin consider buying GPUs instead of renting (you can resell them afterwards)
+
+Don't trust, verify:
+- All code is open-source so you can check nothing malicious is happening
+- Builds are reproducible if you follow the build steps in [./scripts/release.sh](./scripts/release.sh)
+- To compare builds extract and `diff` or use `zipcmp` to ignore timestamps
 
 ## Performance
 If recovery is taking too long:
