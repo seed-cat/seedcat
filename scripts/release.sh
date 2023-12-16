@@ -9,13 +9,18 @@
 # sudo apt update
 # sudo apt install gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 git curl -y
 # git clone https://github.com/seed-cat/seedcat
-# git clone https://github.com/seed-cat/win-iconv
-# cd win-iconv/
-# patch < ../hashcat/tools/win-iconv-64.diff
-# sudo make install
+# cd seedcat/
+# git submodule update --init --recursive
 # cd ..
+# git clone https://github.com/seed-cat/win-iconv.git
+# cd win-iconv/
+# sudo make install
+# cd ../seedcat
 # curl https://sh.rustup.rs -sSf | sh
+# source "$HOME/.cargo/env"
 # rustup target add x86_64-pc-windows-gnu
+#
+# ./scripts/release.sh
 
 SC="seedcat"
 HC="$SC/hashcat"
