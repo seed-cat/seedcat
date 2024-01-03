@@ -1,64 +1,64 @@
 # seedcat
-The [world's fastest](docs/design.md#benchmarks) bitcoin seed word and passphrase recovery tool.
+The [world's fastest](docs/design.md#benchmarks) bitcoin seed phrase recovery tool.
 
-If you lost some of your [mnemonic phrase](https://en.bitcoin.it/wiki/Seed_phrase) this tool can restore access to your bitcoin.
+Modern bitcoin wallets use [BIP39 seed phrases](https://en.bitcoin.it/wiki/Seed_phrase) which consist of 12 or 24 seed words and an optional passphrase.
 
-No need to trust third-party services who charge up to 20% of your funds.
+Users who lose part of their seed phrase cannot access their bitcoin.
+For instance, seed phrase backups might be incorrectly transcribed or damaged by natural disasters.
+Memorized seed phrases may be partially forgotten or lost due to death.
 
-`seedcat` is free and open-source software you can run on your own machine.
+`seedcat` helps you recover missing parts of your seed phrase:
+- Guesses seed words that are missing, fragmented, or out-of-order
+- Guesses passphrases using dictionaries and/or wildcards
+- Leverages GPU parallelism to guess millions of seed phrases per second
+- Open-source, non-custodial software that can run on your own computer
 
-## Setup
+No need to trust third-party recovery services who charge up to 20% of your funds.
 
-- For NVIDIA GPUs install [CUDA](https://developer.nvidia.com/cuda-downloads) (other platforms [see hashcat docs](https://hashcat.net/hashcat/))
-- If you need more powerful hardware see the [renting GPU instructions](docs/renting.md)
-- Download the [latest release zip](https://github.com/seed-cat/seedcat/releases) and extract the folder
+## Recovery instructions
+`seedcat` attempts to guess seed phrases using your GPU
 
-Optionally you can verify the release like so:
+1. For NVIDIA GPUs install [CUDA](https://developer.nvidia.com/cuda-downloads) (other platforms see [hashcat documentation](https://hashcat.net/hashcat/))
+2. Download the [latest release zip](https://github.com/seed-cat/seedcat/releases) and extract the folder 
+3. Optionally you can verify the release like so:
 ```
-gpg --keyserver keyserver.ubuntu.com --recv-keys D249C16D6624F2C1DD0AC20B7E1F90D33230660A
-gpg --verify seedcat_*.zip.sig
-```
+> gpg --keyserver keyserver.ubuntu.com --recv-keys D249C16D6624F2C1DD0AC20B7E1F90D33230660A
+> gpg --verify seedcat_*.zip.sig
 
-You should get the result:
-```
 gpg: Good signature from "Seed Cat <seedcat@protonmail.com>" [unknown]
-gpg: WARNING: This key is not certified with a trusted signature!
-gpg:          There is no indication that the signature belongs to the owner.
-Primary key fingerprint: D249 C16D 6624 F2C1 DD0A  C20B 7E1F 90D3 3230 660A
+Primary key fingerprint: D249 C16D 6624 F2C1 DD0A C20B 7E1F 90D3 3230 660A
 ```
 
-## Usage
-Run `seedcat` on Linux or `seedcat.exe` on Windows to see the command-line options.
+4. Run `seedcat` on Linux or `seedcat.exe` on Windows to view the command-line options.
+5. See our [recovery examples](docs/recovery.md) for detailed instructions.
 
-See our [recovery documentation](docs/recovery.md) for detailed examples.
+If you want to rent large GPU clusters in the cloud see [renting documentation](docs/renting.md)
 
-## Security
-Since `seedcat` outputs your seed phrase anyone with access to your machine could steal your bitcoin.
-- Disable your internet access before running with any secret information
-- Do not enable internet access until you have swept your funds to a new wallet
-- If renting in the cloud make sure you trust the datacenter host
-- For large amounts of bitcoin consider buying GPUs instead of renting (you can resell them afterwards)
+## Security concerns
+Since `seedcat` handles your seed phrase you should take the following security precautions:
+- Disable your internet access before running with any real seed phrase information
+- Sweep all bitcoin to a new wallet before enabling internet access
+- For large recoveries it is safer to build your own GPU cluster than rent
 
-Don't trust, verify:
-- All code is open-source so you can check nothing malicious is happening
-- Builds are reproducible if you follow the build steps in [./scripts/release.sh](./scripts/release.sh)
-- To compare builds extract and `diff` or use `zipcmp` to ignore timestamps
+Also note that:
+- All code is open-source so anyone can verify there is no malicious code
+- You can build from source by following the steps in [./scripts/release.sh](./scripts/release.sh)
 
-## Performance
-If recovery is taking too long:
-- First try to reduce the `Total Guesses` by adding constraints and previewing the configuration
-- Try to find the `XPUB` for your wallet for faster recovery without derivations
-- Lastly upgrade your GPU or consider [renting multi-GPU clusters](docs/renting.md) in the cloud
+## Performance issues
+If recovery is taking too long first try to reduce the number of guesses:
+- `XPUB` offers ~2x the speed and works on non-standard derivation paths and scripts
+- Otherwise try to specify the exact derivation path for your address
+- When seed word guessing specify letters to reduce the possible words (e.g. `so?` instead of `s?`)
+- Leaving the last seed word as `?` may run faster on some systems (by allowing for pure GPU mode)
+- When seed word descrambling anchor words with `^` to reduce the permutations
+- For passphrase mask attacks use the most restrictive wildcards (e.g. `?l` instead of `?a`) or custom charsets
+- For passphrase dictionary attacks try the most frequent words first
 
-When running `seedcat` will display whether it is in `Pure GPU Mode` or `Stdin Mode`
-- The pure GPU mode scales better on multi-GPU clusters
-- Stdin mode is required if you are guessing too many seeds or too few passphrases
-- For more information on modes see the [design docs](docs/design.md#seedcat-frontend)
-
-To ensure your GPU is running correctly you may wish to compare your performance to our reference benchmarks:
-```bash
-seedcat test --bench --diff "<3090|8x4090>"
-```
+You may also need to upgrade your hardware:
+- You should see all your GPUs print out when running
+- A high-end gaming computer can handle ~100B guesses within a day
+- An 8+ GPU cluster can handle ~1T guesses within a day
+- You can test out your recovery speed in the [cloud](docs/renting.md) (using a dummy seed phrase)
 
 ## Contributing
 All contributions are welcome, including reporting bugs or missing features through [new issues](https://github.com/seed-cat/seedcat/issues).

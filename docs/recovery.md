@@ -1,5 +1,5 @@
 # Seed Recovery
-Any recovery requires a [bitcoin address](https://en.bitcoin.it/wiki/Invoice_address) and some seed word information from your wallet.
+Any recovery requires a [bitcoin address](https://en.bitcoin.it/wiki/Invoice_address) and some seed words from your wallet.
 
 For example if you memorized your seed words but can't remember the first 3 words then you could use the `?` wildcard:
 ```bash
@@ -38,6 +38,9 @@ Total Guesses: 17.2B
 `?` wildcards can be used with letters to constrain the words guessed
 - For instance, the word `donkey` will be guessed with `do?` or `?key` or `?onk?`
 - You can also separate different guesses with `|` such as `do?|da?`
+
+With today's hardware if you are completely missing more than 4 seed words then recovery is impossible.
+If you know some information about the missing seed words (such as the first letter) then recovery should be possible.
 
 Let's try again with constraints on the second word:
 ```bash

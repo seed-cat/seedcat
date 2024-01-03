@@ -29,10 +29,9 @@ Generating and filtering valid seeds also needs to be multithreaded and fast so 
 The rest of the frontend is dedicated to providing a more user-friendly UX.  For instance we validate user inputs, provide total counts, and examples so a user can understand what is actually being guessed.
 
 # Benchmarks
-We cannot claim to be the world's fastest recovery tool without some comparisons.
+There have been only two other GPU-optimized BIP39 seed phrase recovery tools written: [btcrecover](https://github.com/gurnec/btcrecover) and John Cantrell's [one-off implementation](https://medium.com/@johncantrell97/how-i-checked-over-1-trillion-mnemonics-in-30-hours-to-win-a-bitcoin-635fe051a752).
 
-As far as we could find there were only two GPU-optimized versions of seed phrase recovery ever written: [btcrecover](https://github.com/gurnec/btcrecover) and John Cantrell's [one-off implementation](https://medium.com/@johncantrell97/how-i-checked-over-1-trillion-mnemonics-in-30-hours-to-win-a-bitcoin-635fe051a752).  Since both implementations have fallen out of maintenance, we already can provide a better user experience that is easier to get working.
-
+Since both implementations have fallen out of maintenance `seedcat` provides superior features and support.
 In fact we had trouble getting either implementation running with CUDA so we had to rely on their self-reported benchmarks and ran comparisons on similar hardware (A2000 for btcrecover and 2080 TI for Cantrell).
 
 | Test          | Implementation | Relative Speed |
@@ -49,4 +48,4 @@ We can see that `seedcat` offers around a **10-100x** improvement in speed.   Th
 
 Against the johncantrell97 implementation the speed-up is smaller and occurs due to better GPU optimizations.  Note that if we attack the master XPUB instead of the address we could gain an additional 2x speed-up.  His implementation was also written as a one-off to win a contest so doesn't support passphrases or any other kinds of attack.
 
-In comparisons against CPU-only recovery tools we generally see a **>50x** improvement in speed which easily gets much higher if running on powerful GPU clusters.  On a 8x 4090 RTX cluster we measured a **447x** improvement over a CPU-based implementation.
+In comparisons against CPU-only recovery tools we generally see a **>50x** improvement in speed which easily gets much higher if running on powerful GPU clusters.  On a 8x 4090 RTX cluster we measured a **~450x** improvement over a CPU-based implementation.
