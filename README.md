@@ -82,3 +82,10 @@ For the Rust unit tests run `cargo test`
 For the C unit tests (if modifying the hashcat code) run `./scripts/test_hashcat.sh test all`
 
 For the integration tests run `cargo run -r -- test -t`
+
+## Reach out
+If you have more questions you can contact seedcat through the following:
+ - [Signal: seedcat.64](https://signal.me/#eu/xgWq9xMfDLO6_Sgj33-xfwuO8rzcM8W99OO0yD1bxhexUKnxCGZAWI-JPufBKqbA)
+ - [Matrix: @seedcat:matrix.org](https://matrix.to/#/@seedcat:matrix.org)
+ - [Nostr: npub18llg4jyr0gaup0kcq9vwxem8qdskqfm5kncmq4al4d3xmdlpp08s4rzgwh](https://primal.net/p/npub18llg4jyr0gaup0kcq9vwxem8qdskqfm5kncmq4al4d3xmdlpp08s4rzgwh)
+ - [Email: seedcat@protonmail.com](mailto:seedcat@protonmail.com)
