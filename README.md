@@ -32,7 +32,7 @@ Primary key fingerprint: D249 C16D 6624 F2C1 DD0A C20B 7E1F 90D3 3230 660A
 4. Run `seedcat` on Linux or `seedcat.exe` on Windows to view the command-line options.
 5. See our [recovery examples](docs/recovery.md) for detailed instructions.
 
-If you want to rent large GPU clusters in the cloud see [renting documentation](docs/renting.md)
+If you have issues running locally or need larger GPU clusters see [renting in the cloud documentation](docs/renting.md)
 
 ## Security concerns
 Since `seedcat` handles your seed phrase you should take the following security precautions:
@@ -85,7 +85,5 @@ For the integration tests run `cargo run -r -- test -t`
 
 ## Reach out
 If you have more questions you can contact seedcat through the following:
- - [Signal: seedcat.64](https://signal.me/#eu/xgWq9xMfDLO6_Sgj33-xfwuO8rzcM8W99OO0yD1bxhexUKnxCGZAWI-JPufBKqbA)
- - [Matrix: @seedcat:matrix.org](https://matrix.to/#/@seedcat:matrix.org)
- - [Nostr: npub18llg4jyr0gaup0kcq9vwxem8qdskqfm5kncmq4al4d3xmdlpp08s4rzgwh](https://primal.net/p/npub18llg4jyr0gaup0kcq9vwxem8qdskqfm5kncmq4al4d3xmdlpp08s4rzgwh)
  - [Email: seedcat@protonmail.com](mailto:seedcat@protonmail.com)
+ - [Open a Github Issue](https://github.com/seed-cat/seedcat/issues/new)
